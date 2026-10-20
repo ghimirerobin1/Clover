@@ -24,6 +24,7 @@ class MockClover:
     def __init__(self) -> None:
         self.items: dict[str, dict[str, Any]] = {i["id"]: i for i in MockClover._fixture("items.json")["elements"]}
         self.categories: list[dict[str, Any]] = MockClover._fixture("categories.json")["elements"]
+        self.created = 0
 
     @staticmethod
     def _fixture(name: str) -> dict[str, Any]:
@@ -50,6 +51,10 @@ class MockClover:
         if (im := re.fullmatch(r"items/([^/]+)", rest)) and request.method == "GET":
             item = self.items.get(im.group(1))
             return self._json(200, copy.deepcopy(item)) if item else self._json(404, {"message": "Item not found"})
+        if request.method == "POST" and rest == "items":
+            return self._create_item(request)
+        if request.method == "POST" and rest == "category_items":
+            return self._link_category(request)
         if sm := re.fullmatch(r"item_stocks/([^/]+)", rest):
             return self._item_stock(request, sm.group(1))
         return self._json(404, {"message": "Not found"})
@@ -68,6 +73,35 @@ class MockClover:
                 field, value = m.group(1), m.group(2)
                 rows = [r for r in rows if r.get(field) == value]
         return self._json(200, {"elements": copy.deepcopy(rows[offset : offset + limit])})
+
+    def _create_item(self, request: httpx.Request) -> httpx.Response:
+        # VERIFY: Clover's create response is the new item (id, modifiedTime), without itemStock until stock is set.
+        body = json.loads(request.content or b"{}")
+        if not isinstance(body.get("name"), str) or not body["name"] or not isinstance(body.get("price"), int):
+            return self._json(400, {"message": "name and price are required"})
+        self.created += 1
+        item_id = f"MOCKNEW{self.created:05d}"
+        item: dict[str, Any] = {
+            "id": item_id,
+            "name": body["name"],
+            "sku": body.get("sku"),
+            "code": body.get("code"),
+            "price": body["price"],
+            "priceType": body.get("priceType", "FIXED"),
+            "modifiedTime": 1770000000000 + self.created,
+        }
+        self.items[item_id] = item
+        return self._json(200, copy.deepcopy(item))
+
+    def _link_category(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content or b"{}")
+        for el in body.get("elements", []):
+            item = self.items.get(el.get("item", {}).get("id", ""))
+            cat = next((c for c in self.categories if c["id"] == el.get("category", {}).get("id")), None)
+            if item is None or cat is None:
+                return self._json(400, {"message": "Unknown item or category"})
+            item["categories"] = {"elements": [{"id": cat["id"], "name": cat["name"]}]}
+        return self._json(200, {})
 
     def _item_stock(self, request: httpx.Request, item_id: str) -> httpx.Response:
         item = self.items.get(item_id)

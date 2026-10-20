@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS audit_log_created_at ON audit_log (created_at);
 CREATE INDEX IF NOT EXISTS audit_log_item ON audit_log (location_id, item_id);
+
+-- Shared low-stock thresholds (never written to Clover).
+CREATE TABLE IF NOT EXISTS thresholds (
+    location_id TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('item', 'category')),
+    ref_id TEXT NOT NULL,
+    threshold INTEGER NOT NULL CHECK (threshold >= 0),
+    device_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (location_id, scope, ref_id)
+);
 """
 
 

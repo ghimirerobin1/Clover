@@ -97,6 +97,16 @@ const STEPS: readonly string[] = [
   );
   CREATE INDEX queued_intents_status ON queued_intents (status, created_at);
   `,
+  // v4 — threshold changes not yet pushed to the proxy (offline edits). Local value is already applied.
+  `
+  CREATE TABLE threshold_outbox (
+    scope TEXT NOT NULL CHECK (scope IN ('item', 'category')),
+    ref_id TEXT NOT NULL,
+    threshold INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (scope, ref_id)
+  );
+  `,
 ];
 
 export class Migrations {

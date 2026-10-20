@@ -6,7 +6,13 @@ export type SettingKey =
   | 'synced_through_modified'
   | 'global_low_stock_threshold'
   | 'variable_weight_prefixes'
-  | 'create_items_enabled';
+  | 'create_items_enabled'
+  /** Cached from GET /me: whether this device key carries canCreateItems. */
+  | 'device_can_create'
+  | 'scan_default_mode'
+  | 'scan_beep'
+  | 'scan_haptics'
+  | 'theme';
 
 export class SettingsRepo {
   static async get(db: SqlDb, key: SettingKey): Promise<string | null> {
@@ -26,6 +32,12 @@ export class SettingsRepo {
       'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       [key, String(value)],
     );
+  }
+
+  /** '1' / '0' flags; missing = fallback. */
+  static async flag(db: SqlDb, key: SettingKey, fallback: boolean): Promise<boolean> {
+    const v = await SettingsRepo.get(db, key);
+    return v == null ? fallback : v === '1';
   }
 
   static async globalThreshold(db: SqlDb): Promise<number> {

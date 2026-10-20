@@ -3,6 +3,7 @@ import { AppDatabase } from '../db/ExpoSqlDb';
 import { SettingsRepo } from '../db/settings';
 import { ApiError } from '../lib/errors';
 import { CatalogSync, type CatalogSource } from './CatalogSync';
+import { ThresholdSync } from './ThresholdSync';
 import { useSyncStore } from './syncStore';
 
 const proxySource: CatalogSource = {
@@ -25,6 +26,8 @@ export class SyncController {
         full: opts.full,
         onProgress: (progress) => useSyncStore.setState({ progress }),
       });
+      // Shared thresholds are best-effort: a failure here must not fail the catalog sync.
+      await ThresholdSync.pull(db, ProxyClient).catch(() => undefined);
       useSyncStore.setState((s) => ({
         status: 'idle',
         progress: null,

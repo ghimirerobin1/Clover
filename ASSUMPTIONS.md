@@ -1,4 +1,4 @@
-# Assumptions (Milestones 1–3)
+# Assumptions (Milestones 1–6)
 
 Decisions not dictated by the spec. Each is the safest reasonable option.
 
@@ -117,3 +117,18 @@ Decisions not dictated by the spec. Each is the safest reasonable option.
 - Beep: a 70 ms 1760 Hz tone synthesized at runtime (no media file committed), cached to the app cache dir and played with expo-audio, mixing with
   other audio and respecting the silent switch. The expo-audio plugin is configured with no microphone permission.
 
+
+## Milestone 6 (Create item, Settings, thresholds, performance)
+
+- Create is gated twice: the local Settings toggle (default off, turned on only after a confirmation alert) **and** the device key's
+  `canCreateItems` flag (`python -m app.pair --allow-create-items`). The app caches the flag from `/me`; the proxy re-checks it on every request.
+- Create is a single attempt with a fresh `clientMutationId` per tap. Network / upstream / 409 → "outcome unknown"; the user checks by syncing
+  or scanning. Nothing is retried automatically.
+- The item is created with `priceType: FIXED`. Category link and initial stock are separate Clover calls; if one fails the item still exists,
+  the response carries warnings and the audit row is `partial` (we don't retry or roll back).
+- Initial stock 0 is sent as 0 (tracked); a blank field leaves stock untracked.
+- Item and category thresholds are shared through the proxy (`thresholds` table) with a local outbox; pending local edits win over a pull,
+  and between devices the last push wins. The global threshold stays per device.
+- Theme override uses React Native `Appearance.setColorScheme` (`unspecified` = follow system).
+- Version/build come from `app.json` (`version`, `ios.buildNumber`, `android.versionCode`) via `expo-constants`.
+- Performance numbers are from the build box (WASM SQLite in Node; mock Clover in-process) and are a baseline, not device numbers.
