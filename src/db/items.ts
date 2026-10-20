@@ -224,6 +224,13 @@ export class ItemRepo {
     await db.run('UPDATE items SET low_stock_threshold = ? WHERE id = ?', [threshold, itemId]);
   }
 
+  static async setCategoryThreshold(db: SqlDb, categoryId: string, threshold: number | null): Promise<void> {
+    if (threshold != null && (!Number.isInteger(threshold) || threshold < 0)) {
+      throw new RangeError('threshold must be a non-negative integer');
+    }
+    await db.run('UPDATE categories SET low_stock_threshold = ? WHERE id = ?', [threshold, categoryId]);
+  }
+
   static async clear(db: SqlDb): Promise<void> {
     await db.exec("DELETE FROM items; DELETE FROM categories; DELETE FROM barcode_aliases; INSERT INTO items_fts(items_fts) VALUES ('rebuild');");
   }

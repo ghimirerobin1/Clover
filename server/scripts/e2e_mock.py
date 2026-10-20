@@ -6,6 +6,8 @@ changes stock between read and write), an idempotent retry, and a sequential bat
     CLOVER_MOCK=1 DATABASE_PATH=/tmp/e2e.sqlite3 uv run uvicorn app.main:app --port 8765 &
     CLOVER_MOCK=1 DATABASE_PATH=/tmp/e2e.sqlite3 uv run python scripts/e2e_mock.py --base http://127.0.0.1:8765
 
+Also covers gated item creation (off → 403, on → created, replay idempotent) and shared thresholds.
+
 Exits non-zero on the first failed check. Only ever talks to the mock (refuses if /health says mock=false).
 """
 
@@ -36,17 +38,18 @@ class E2E:
         self.passed += 1
 
     @staticmethod
-    def issue_code() -> str:
+    def issue_code(*, allow_create: bool = False) -> str:
+        argv = [sys.executable, "-m", "app.pair"] + (["--allow-create-items"] if allow_create else [])
         out = subprocess.run(  # noqa: S603 - fixed argv, our own CLI
-            [sys.executable, "-m", "app.pair"], check=True, capture_output=True, text=True, env=os.environ.copy()
+            argv, check=True, capture_output=True, text=True, env=os.environ.copy()
         ).stdout
         m = re.search(r"Pairing code:\s*(\w{4}) (\w{4})", out)
         if not m:
             raise RuntimeError(f"unexpected pair output: {out!r}")
         return m.group(1) + m.group(2)
 
-    def pair(self, name: str) -> dict[str, str]:
-        r = self.http.post("/pair", json={"code": self.issue_code(), "deviceName": name})
+    def pair(self, name: str, *, allow_create: bool = False) -> dict[str, str]:
+        r = self.http.post("/pair", json={"code": self.issue_code(allow_create=allow_create), "deviceName": name})
         self.check(f"pair {name}", r.status_code == 200, r.status_code)
         return {"X-App-Key": r.json()["appKey"]}
 
@@ -205,7 +208,82 @@ class E2E:
             "audit filter itemId+action",
             all(e["itemId"] == "ITEM_RAMEN" and e["action"] == "receive" for e in r.json()["entries"]),
         )
+        self.create_items(a)
+        self.thresholds(a, b)
         print(f"\nAll {self.passed} checks passed. Audit statuses: {statuses}")
+
+    def create_items(self, plain: dict[str, str]) -> None:
+        body: dict[str, Any] = {
+            "name": "E2E Mango Lassi",
+            "priceCents": 349,
+            "code": "012345678905",
+            "sku": "E2E-LASSI",
+            "categoryId": "CAT_SNACK",
+            "initialStock": 12,
+            "clientMutationId": str(uuid.uuid4()),
+        }
+        url = f"/locations/{LOC}/items"
+        me = self.http.get("/me", headers=plain).json()
+        self.check("plain device has canCreateItems=false", me["canCreateItems"] is False, me)
+        r = self.http.post(url, headers=plain, json=body)
+        self.check(
+            "create gated off → 403 AUTH", r.status_code == 403 and r.json()["error"]["code"] == "AUTH", r.json()
+        )
+        lookup = self.http.get(
+            f"/locations/{LOC}/items/lookup", headers=plain, params={"code": str(body["code"])}
+        ).json()
+        self.check("…and nothing was created", lookup["match"] is None and lookup["candidates"] == [], lookup)
+
+        c = self.pair("e2e-manager", allow_create=True)
+        self.check("manager has canCreateItems=true", self.http.get("/me", headers=c).json()["canCreateItems"] is True)
+        r1 = self.http.post(url, headers=c, json=body)
+        out = r1.json()
+        item = out.get("item", {})
+        self.check(
+            "create gated on → created",
+            r1.status_code == 200
+            and item.get("priceCents") == 349
+            and item.get("stockQty") == 12
+            and out["warnings"] == [],
+            out,
+        )
+        self.check("created item has its category", item.get("categoryId") == "CAT_SNACK", item)
+        r2 = self.http.post(url, headers=c, json=body)
+        self.check(
+            "create replay is idempotent (same id, replayed)",
+            r2.status_code == 200 and r2.json()["replayed"] is True and r2.json()["item"]["id"] == item["id"],
+            r2.json(),
+        )
+        found = self.http.get(
+            f"/locations/{LOC}/items/lookup", headers=plain, params={"code": str(body["code"])}
+        ).json()
+        self.check("exactly one item exists for the UPC", (found["match"] or {}).get("id") == item["id"], found)
+        r3 = self.http.post(url, headers=c, json={**body, "name": "Changed"})
+        self.check("same id, different body → 409", r3.status_code == 409, r3.json()["error"]["code"])
+        bad = self.http.post(url, headers=c, json={**body, "priceCents": 3.49, "clientMutationId": str(uuid.uuid4())})
+        self.check("float price rejected (money is integer cents)", bad.status_code == 422)
+        creates = [
+            e
+            for e in self.http.get(f"/locations/{LOC}/audit", headers=c, params={"limit": 200}).json()["entries"]
+            if e["action"] == "create"
+        ]
+        self.check("create audited once", len(creates) == 1 and creates[0]["itemId"] == item["id"], len(creates))
+        # The new item takes part in the normal stock write path.
+        r = self.confirmed(c, item["id"], "receive", lambda q: q + 3)
+        self.check("receive on the new item", r.status_code == 200 and r.json()["newQuantity"] == 15, r.json())
+
+    def thresholds(self, a: dict[str, str], b: dict[str, str]) -> None:
+        base = f"/locations/{LOC}/thresholds"
+        self.http.put(f"{base}/item/ITEM_RICE20", headers=a, json={"threshold": 25})
+        self.http.put(f"{base}/category/CAT_RICE", headers=a, json={"threshold": 9})
+        seen = self.http.get(base, headers=b).json()
+        self.check(
+            "thresholds shared across devices",
+            seen == {"items": {"ITEM_RICE20": 25}, "categories": {"CAT_RICE": 9}},
+            seen,
+        )
+        self.http.put(f"{base}/item/ITEM_RICE20", headers=b, json={"threshold": None})
+        self.check("threshold cleared", self.http.get(base, headers=a).json()["items"] == {})
 
 
 if __name__ == "__main__":

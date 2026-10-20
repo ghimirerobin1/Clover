@@ -3,9 +3,9 @@
 Mobile inventory app (Expo / React Native) for a two-location grocery that uses **Clover POS as the
 system of record**, plus a thin FastAPI proxy that holds the Clover credentials.
 
-> **Status: Milestone 5 (Low Stock, continuous scan, batch, offline queue).** Skeleton, catalog, scanning, Receive / Count / Adjust with the
-> read-verify-write protocol, Activity, plus the Low Stock tab, continuous counting scan with Review & apply (batch confirmation, sequential writes),
-> and an offline intent queue (deltas only, never auto-flushed). Mock-mode e2e: `server/scripts/e2e_mock.py`.
+> **Status: Milestone 6 (spec complete for v1).** Catalog, scanning, Receive / Count / Adjust (read-verify-write), Activity, Low Stock,
+> continuous counting + batch apply, offline intent queue, gated Create item, full Settings, and shared item/category thresholds.
+> See `SUMMARY.md` for what works, what's partial and measured numbers. Mock-mode e2e: `server/scripts/e2e_mock.py`.
 
 ## Architecture
 
@@ -116,10 +116,17 @@ All require `X-App-Key`. `GET /locations/default/items?limit=1..1000&offset&modi
 - First run: full sync paged at 1000, written in transactions of 500, with a progress count. Afterwards: delta sync by
   `modifiedSince` on launch, foreground, every 10 min, and pull-to-refresh. Header shows "Synced N min ago" and an amber
   banner when offline or > 1 h stale.
-- Search uses an FTS5 prefix index on name/SKU/UPC (measured median 3 ms over 15k items in tests). Lists render with FlashList.
+- Search uses an FTS5 prefix index on name/SKU/UPC (p50 4 ms / p95 6 ms over 15k items on the build box; see VERIFICATION.md → Performance). Lists render with FlashList.
 - Settings → Developer → **Seed 15,000 fake items** (dev builds only) for on-device testing.
 
 ## Future modules (seams)
+
+Out of scope for v1, by design: purchase orders, suppliers, cost/margin reporting, CSV/PDF exports, a multi-location UI,
+user accounts beyond device keys, and Clover OAuth. None of them is built, but each has a seam: every route is already
+scoped by `/locations/{locationId}`, writes all go through one audited, idempotent proxy path that new modules can reuse,
+the item model carries `cost_cents`, and credentials live only in the proxy's location config, so OAuth or more locations
+don't change the app.
+
 
 - **Purchase orders / suppliers:** new `/src/features/purchasing` plus `/locations/{loc}/purchase-orders` routes;
   receiving reuses the stock write protocol.

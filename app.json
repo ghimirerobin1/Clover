@@ -8,10 +8,12 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ghimire.stockroom"
+      "bundleIdentifier": "com.ghimire.stockroom",
+      "buildNumber": "1"
     },
     "android": {
-      "package": "com.ghimire.stockroom"
+      "package": "com.ghimire.stockroom",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro"

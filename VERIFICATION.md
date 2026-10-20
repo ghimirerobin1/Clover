@@ -23,7 +23,11 @@ uv run python -m app.pair          # then: curl -XPOST localhost:8000/pair -H 'c
 curl localhost:8000/me -H "X-App-Key: <appKey>"
 
 # Secrets grep (must return nothing)
-rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
+rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT|MOCKMERCHANT|mock-token" app src
+
+# Performance (spec §6)
+PERF=1 PERF_OUT=/tmp/perf.json npx jest src/perf   # app-side, WASM SQLite under Node
+cd server && PYTHONPATH=. uv run python scripts/perf_proxy.py
 ```
 
 ## VERIFY items (confirm against current Clover docs)
@@ -32,25 +36,29 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 |---|---|
 | `server/app/config.py:28` | Base URLs for non-US regions (EU / LatAm hosts) |
 | `server/app/config.py:31` | Current per-token rate limit (we throttle at 8 req/s, burst 8) |
-| `server/app/main.py:27` | Whether limits are per token or per merchant/app (one bucket per location token today) |
-| `server/app/clover.py:79` | Auth header is `Authorization: Bearer <token>` for merchant API tokens |
-| `server/app/clover.py:105` | Error bodies expose a `message` field |
+| `server/app/main.py:29` | Whether limits are per token or per merchant/app (one bucket per location token today) |
+| `server/app/clover.py:95` | Auth header is `Authorization: Bearer <token>` for merchant API tokens |
+| `server/app/clover.py:121` | Error bodies expose a `message` field |
 | `server/app/mock.py:18` | Max `limit` for `GET /v3/merchants/{mId}/items` (assumed 1000) |
 | `server/app/mock.py:23` | Item shape: `price`/`cost` cents, `itemStock.quantity`, `categories.elements`, `modifiedTime` (ms) |
-| `server/app/mock.py:72` | `POST /v3/merchants/{mId}/item_stocks/{itemId}` with `{"quantity": N}` sets absolute stock |
-| `server/app/mock.py:62` | Delta filter syntax `filter=modifiedTime>=<ms>` (mock implements this) |
+| `server/app/mock.py:67` | Delta filter syntax `filter=modifiedTime>=<ms>` (mock implements this) |
+| `server/app/mock.py:78` | Create response is the new item (id, modifiedTime) without `itemStock` until stock is set |
+| `server/app/mock.py:114` | `POST item_stocks/{itemId}` with `{"quantity": N}` sets absolute stock |
 | `server/app/catalog.py:16` | Max page size for `/items` (1000) |
 | `server/app/catalog.py:18` | `expand=itemStock,categories` names |
 | `server/app/catalog.py:57` | Item field names (`price`, `cost`, `modifiedTime`, `deleted`, `itemStock.quantity`, `categories.elements`) |
 | `server/app/catalog.py:120` | Delta filter syntax; whether deleted items are returned by the delta query at all |
-| `server/app/routes/catalog.py:42` | Category page size (assumes < 1000 categories) |
+| `server/app/catalog.py:147` | Lookup filter `filter=code=<v>` / `filter=sku=<v>`; whether alternate barcodes are queryable (not used — local `barcode_aliases`) |
+| `server/app/routes/catalog.py:64` | Category page size (assumes < 1000 categories) |
+| `server/app/stock.py:155` | Whether Clover accepts fractional stock (app allows whole units only; sent as ints) |
+| `server/app/stock.py:208` | `POST item_stocks/{itemId}` `{"quantity": N}` sets **absolute** stock (we never send deltas) |
+| `server/app/stock.py` (live read) | `GET /items/{id}?expand=itemStock` reflects sales immediately (expected-quantity check relies on it) |
+| `server/app/create_item.py:66` | `POST /v3/merchants/{mId}/items` accepts `{name, price (cents), priceType: FIXED, sku, code}` |
+| `server/app/create_item.py:127` | Category link via `POST /v3/merchants/{mId}/category_items` `{"elements":[{item, category}]}` |
+| `server/app/create_item.py:140` | Initial stock via `POST item_stocks/{id}` on a brand-new item (stock tracking may need enabling first) |
 | `src/sync/CatalogSync.ts:33` | Client page size matches the proxy/Clover max (1000) |
-| `server/app/catalog.py:147` | Lookup filter syntax `filter=code=<v>` / `filter=sku=<v>`; whether Clover exposes alternate barcodes to query (not used — local `barcode_aliases` cover alternates) |
-| `src/lib/barcode.ts` (spec, not Clover) | The store's actual variable-weight layout (prefix `2`, 5 item digits assumed; configurable via the `variable_weight_prefixes` setting) and how weighted items' `code` is stored in Clover |
+| `src/lib/barcode.ts` (spec, not Clover) | Store's variable-weight layout (prefix `2`, 5 item digits; now editable in Settings → Scanning) |
 | `README.md` | Exact name of the "Track stock" item setting |
-| `server/app/stock.py:208` | `POST /v3/merchants/{mId}/item_stocks/{itemId}` with `{"quantity": N}` sets **absolute** stock (we send absolute, never deltas) |
-| `server/app/stock.py:155` | Whether Clover accepts fractional stock quantities (app only allows whole units; whole numbers are sent as ints) |
-| `server/app/stock.py` (live read) | `GET /items/{id}?expand=itemStock` reflects sales immediately (no read-after-write lag), which the expected-quantity check relies on |
 
 ## What the tests cover (Milestone 1)
 
@@ -110,6 +118,37 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 - `src/features/stock/__tests__/StockSheet.test.tsx`: offline sheet queues Receive as a delta with no write; Count can't be queued; the write-path
   scan now allows exactly `StockSheet.tsx` and `BatchRunner.ts` to call `StockWriter.apply` (still the only caller of `writeStock`).
 
+## Milestone 6 (Create item, Settings, thresholds, performance) coverage
+
+- `src/features/create/__tests__/CreateItem.test.ts`: gate matrix (setting × device flag, default off), validation (name, cents mask, stock, lengths), request mapping, summary, writer outcomes (success upserts; 403 clears the cached flag; network/upstream/409 → unknown, single attempt), and a static check that only `CreateItem.ts` calls `.createItem(`.
+- `CreateItemScreen.test.tsx`: gate-off empty state; form → Review summary → Create; unknown panel.
+- `src/sync/__tests__/ThresholdSync.test.ts`: outbox push order, stop on failure, pending edits win over pull, clear.
+- `src/features/settings/__tests__/AppPrefs.test.ts`: theme, threshold and prefix parsing, version.
+- `server/tests/test_create_and_thresholds.py` (10): key required; gated off → 403, nothing created, no audit; applied + audited; replay idempotent; reuse id + other body → 409; validation; unknown → pending → 409, one Clover call; 429 frees id; 400 stored and replayed; follow-up failure → warning + `partial`; thresholds round-trip and clear.
+
+### Performance (measured on the build box, not a device)
+
+App (`src/perf`, WASM SQLite in Node — a rough baseline only; integer-ms timer):
+| Metric (15k items) | Result |
+|---|---|
+| Seed 15,000 items | 842 ms |
+| FTS search, 70 queries | p50 4 ms · p95 6 ms · max 10 ms |
+| List: all by name / stock asc / low filter / not counted 30d | 211 / 206 / 21 / 213 ms |
+| Low Stock query (3,135 rows) / count / group | 45 / 3 / 9 ms |
+| Scan lookup from cache | p50 0 ms · p95 1 ms |
+| Client full sync of 10k (parse + write) | 492 ms |
+
+Proxy (`scripts/perf_proxy.py`, mock Clover in-process, includes the 8 req/s limiter, excludes real Clover latency):
+| Metric | Result |
+|---|---|
+| Full catalog 10k via proxy (pages of 1000) | 389 ms |
+| Fresh item read (limiter-bound) | p50 125 ms · p95 127 ms |
+| Stock write (read + write, 2 Clover calls) | p50 250 ms · p95 253 ms |
+
+Android JS bundle (`expo export`): 5.04 MB Hermes bytecode.
+
+**Needs a device:** cold start (< 2 s), scroll at 60 fps on 15k, scan → sheet (< 300 ms), real Wi-Fi full sync against Clover, beep/haptics feel, `Appearance.setColorScheme` theme override.
+
 ### End-to-end (mock mode, real HTTP)
 
 ```
@@ -121,7 +160,7 @@ CLOVER_MOCK=1 DATABASE_PATH=/tmp/e2e.sqlite3 uv run python scripts/e2e_mock.py -
 `scripts/e2e_mock.py` pairs two devices via the CLI + `/pair`, then drives receive, count, adjust (and adjust without reason → 422),
 a forced 409 (device B changes stock between A's read and write) with re-confirm, an idempotent retry (replayed, same audit id, applied once;
 same id + different body → 409), and a 4-row batch (200 / 200 / 422 untracked / 409 after a sale) with the conflict re-confirmed,
-then checks the audit feed. Last run (Oct 20 2026): **25/25 checks passed**, audit `{applied: 10, conflict: 3}`.
+then checks the audit feed. M6 adds create-item (gated-off device → 403 and nothing created; manager key → created with price/stock/category; replay → same id, one item; same id + different body → 409; float price → 422; audited once; receive on the new item) and shared thresholds. Last run (Oct 20 2026, 2:30 PM CDT): **40/40 checks passed**, audit `{applied: 10, conflict: 3}`.
 
 ## Manual test script
 
@@ -129,7 +168,7 @@ Milestone 3 (Scan) — needs a physical device (camera):
 1. Scan tab asks for camera permission; deny → "Camera access needed" with manual entry.
 2. Allow → full-screen camera with viewfinder; toggle torch; zoom −/+/reset.
 3. Scan a fixture-coded item (or print UPC `074410000123`) → haptic → item sheet with name, price, cached stock, "View details".
-4. Scan a code not in the catalog → proxy lookup → Not found sheet: Search manually (opens Inventory pre-searched), Link to existing item (pick one; rescan → found via alias). "Create in Clover" is not shown (disabled by default).
+4. Scan a code not in the catalog → proxy lookup → Not found sheet: Search manually (opens Inventory pre-searched), Link to existing item (pick one; rescan → found via alias). "Create in Clover" is not shown unless enabled (M6, step 15).
 5. Variable-weight: enter `201234012999`-style code (prefix 2) on the keypad → Pork Belly + "Weighted item — stock tracked by unit".
 6. Holding the same barcode in view does not reopen the sheet repeatedly (1.2 s debounce; scanning paused while a sheet is open).
 7. Enter code manually → keypad → Look up. No stock writes anywhere.
@@ -164,21 +203,18 @@ Milestone 5:
 13. Review & apply → every row shows live before → after; remove a row; Count vs Receive toggle; Apply → per-row ✓ / Conflict / Failed; tap again to retry.
 14. Stop the proxy, open Receive → "Queue for later (+24)"; Activity shows it as Queued. Restart proxy: nothing is sent until "Review & apply queued".
 
-Later milestones: gated create-item, Settings polish, 15k-item seed performance on device.
+Milestone 6:
+15. Create item: pair a normal device → Settings → "Allow creating items" is disabled ("not allowed for this device key"). Pair with `python -m app.pair --allow-create-items` → toggle → confirmation alert → on. Scan an unknown code → Not found → Create in Clover → UPC prefilled; type `349` → "$3.49"; Review → summary → Create in Clover → item opens; Inventory shows it. Kill the proxy during Create → "Outcome unknown" panel, no retry.
+16. Settings: global threshold (0–9999) changes Low Stock; category editor sets a category default; a second device sees item/category thresholds after sync. Scan defaults (mode, beep, haptics), variable-weight prefixes (e.g. `2,02`), theme System/Light/Dark, Clear cache → list empty, sync restores items and thresholds. About shows version/build.
+17. Performance on device: Settings → Developer → Seed 15,000 → cold start, scroll fps, search, scan → sheet time; record the numbers here.
 
 ## Known gaps / stubs
 
-- Create-item route not yet (Milestone 6). "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
 - Beep (synthesized WAV via expo-audio + expo-file-system) and continuous-scan ergonomics are not yet verified on a device.
 - Tally is in memory (zustand): it survives navigation but not an app restart.
 - Batch rows whose outcome was unknown are not re-sent; resolve them in Activity (Unconfirmed).
-- Category default thresholds still have no editor UI (Settings, M6); tests set them directly.
-- No settings UI yet for the variable-weight prefix rule (stored setting `variable_weight_prefixes`, default `2`).
-- Beep/haptics preferences are not configurable yet; haptics are always on.
 - Barcode aliases are local only (per spec); they are not synced between devices.
 - Scan → sheet latency (< 300 ms target) not yet measured on a device.
-- Per-item thresholds are stored **locally only**; the spec also wants them on the proxy — deferred (no proxy route yet).
-- Category default thresholds have a column but no editor UI yet (Milestone 5 / Settings).
 - `last_counted_at` is set by local Counts only (not by counts from other devices until a sync rule exists).
 - Stock history / Activity show only writes made through this proxy (Clover sales are not in the audit log).
 - Unconfirmed rows are resolved manually (Re-check / Dismiss); there is no automatic reconciliation against the audit log yet.
@@ -186,6 +222,8 @@ Later milestones: gated create-item, Settings polish, 15k-item seed performance 
 - Per-item write lock is in-process (one proxy worker assumed).
 - Sync progress shows item count with an indeterminate bar (Clover gives no total count).
 - Offline detection is inferred from the last sync failing with a network error (no NetInfo dependency).
-- Not yet measured on a device: cold start, scroll fps, 10k full-sync time.
 - Pairing throttle is in-process (resets on restart; per worker if run with multiple workers).
-- `SUMMARY.md` (spec §9) is deferred to the final milestone; no performance numbers yet.
+- Global low-stock threshold is per device (only item/category thresholds are shared via the proxy).
+- Threshold conflicts between devices: last push wins (no per-field merge).
+- Create item follow-ups (category link, initial stock) are best-effort; failures return warnings and the audit row is `partial`.
+- Not yet measured on a device: cold start, scroll fps, scan → sheet latency, real Clover sync (see Performance).

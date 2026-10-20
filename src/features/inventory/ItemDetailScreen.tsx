@@ -3,13 +3,14 @@ import { Stack } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 
+import { ProxyClient } from '../../api/proxy';
 import { Badge, Button, EmptyState, Skeleton } from '../../components';
 import { AppDatabase } from '../../db/ExpoSqlDb';
-import { ItemRepo } from '../../db/items';
 import { ApiError } from '../../lib/errors';
 import { Money } from '../../lib/money';
 import { Thresholds } from '../../lib/thresholds';
 import { SyncController } from '../../sync/SyncController';
+import { ThresholdSync } from '../../sync/ThresholdSync';
 import { AuditRow, useAudit } from '../activity';
 import { ACTION_LABEL, StockSheetController } from '../stock';
 import { ItemFormat } from './ItemListRow';
@@ -93,7 +94,7 @@ export function ItemDetailScreen({ id }: { id: string }) {
   const parsed = ThresholdInput.parse(thresholdText ?? '');
   const saveThreshold = async () => {
     if (parsed === undefined) return;
-    await ItemRepo.setThreshold(await AppDatabase.get(), id, parsed);
+    await ThresholdSync.set(await AppDatabase.get(), ProxyClient, 'item', id, parsed);
     setThresholdText(null);
     SyncController.bumpData();
     await qc.invalidateQueries({ queryKey: ['local'] });

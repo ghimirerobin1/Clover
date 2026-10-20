@@ -9,6 +9,14 @@ import {
   LookupResultSchema,
   AuditPageSchema,
   StockWriteResultSchema,
+  CreateItemResultSchema,
+  DeviceSchema,
+  ThresholdMapSchema,
+  type CreateItemRequest,
+  type CreateItemResult,
+  type Device,
+  type ThresholdMap,
+  type ThresholdScope,
   type AuditPage,
   type StockWriteRequest,
   type StockWriteResult,
@@ -112,13 +120,42 @@ export class ProxyClient {
     return AuditPageSchema.parse(body);
   }
 
+  /** This device's key and permissions (canCreateItems). */
+  static async me(opts: RequestOptions = {}): Promise<Device> {
+    return DeviceSchema.parse(await ProxyClient.request('GET', '/me', opts));
+  }
+
+  /**
+   * Gated item creation. Single attempt with an idempotency key — never retried automatically.
+   * Only CreateItemWriter calls this, after the user taps the confirmation summary.
+   */
+  static async createItem(body: CreateItemRequest, opts: RequestOptions = {}): Promise<CreateItemResult> {
+    const res = await ProxyClient.request('POST', `/locations/${DEFAULT_LOCATION}/items`, opts, body);
+    return CreateItemResultSchema.parse(res);
+  }
+
+  /** Shared low-stock thresholds (stored on the proxy, never in Clover). */
+  static async thresholds(opts: RequestOptions = {}): Promise<ThresholdMap> {
+    return ThresholdMapSchema.parse(await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/thresholds`, opts));
+  }
+
+  static async putThreshold(scope: ThresholdScope, id: string, threshold: number | null, opts: RequestOptions = {}): Promise<ThresholdMap> {
+    const res = await ProxyClient.request(
+      'PUT',
+      `/locations/${DEFAULT_LOCATION}/thresholds/${scope}/${encodeURIComponent(id)}`,
+      opts,
+      { threshold },
+    );
+    return ThresholdMapSchema.parse(res);
+  }
+
   static async categories(opts: RequestOptions = {}): Promise<RemoteCategory[]> {
     const body = await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/categories`, opts);
     return CategoryListSchema.parse(body).categories;
   }
 
   private static async request(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     opts: RequestOptions,
     json?: unknown,

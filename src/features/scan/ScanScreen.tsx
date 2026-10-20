@@ -12,6 +12,7 @@ import type { ItemRow } from '../../db/items';
 import { SettingsRepo } from '../../db/settings';
 import { Barcode } from '../../lib/barcode';
 import { Beep } from '../../lib/beep';
+import { CreateGate } from '../create';
 import { Tally, TallyController, useTallyStore, type TallyRow } from '../batch';
 import { StockSheetController } from '../stock';
 import { Keypad } from './Keypad';
@@ -40,7 +41,10 @@ function useScanPrefs() {
       const db = await AppDatabase.get();
       return {
         rule: Barcode.parseRule(await SettingsRepo.get(db, 'variable_weight_prefixes')),
-        canCreate: (await SettingsRepo.get(db, 'create_items_enabled')) === '1',
+        canCreate: (await CreateGate.load(db)).allowed,
+        defaultMode: ((await SettingsRepo.get(db, 'scan_default_mode')) === 'continuous' ? 'continuous' : 'single') as ScanMode,
+        beep: await SettingsRepo.flag(db, 'scan_beep', true),
+        haptics: await SettingsRepo.flag(db, 'scan_haptics', true),
         globalThreshold: await SettingsRepo.globalThreshold(db),
       };
     },
@@ -54,16 +58,19 @@ export function ScanScreen() {
   const [zoom, setZoom] = useState(0);
   const [sheet, setSheet] = useState<SheetState>({ kind: 'closed' });
   const [manual, setManual] = useState('');
-  const [mode, setMode] = useState<ScanMode>('single');
+  const [modeOverride, setMode] = useState<ScanMode | null>(null);
   const tally = useTallyStore((s) => s.rows);
   const debouncer = useRef(new ScanDebouncer());
   const prefs = useScanPrefs();
+  const mode: ScanMode = modeOverride ?? prefs.data?.defaultMode ?? 'single';
+  const haptics = prefs.data?.haptics ?? true;
+  const beep = prefs.data?.beep ?? true;
 
   const addToTally = useCallback((item: ItemRow) => {
     TallyController.add(item);
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    void Beep.play();
-  }, []);
+    if (haptics) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (beep) void Beep.play();
+  }, [haptics, beep]);
 
   const lookup = useCallback(
     async (raw: string, type?: string) => {
@@ -77,22 +84,22 @@ export function ScanScreen() {
         setSheet({ kind: 'closed' });
         return;
       }
-      void Haptics.notificationAsync(
+      if (haptics) void Haptics.notificationAsync(
         outcome.kind === 'not_found' ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
       );
       setSheet(outcome.kind === 'found' ? { kind: 'item', item: outcome.item, outcome } : { kind: 'result', outcome });
     },
-    [prefs.data, mode, addToTally],
+    [prefs.data, mode, addToTally, haptics],
   );
 
   const scanning = sheet.kind === 'closed';
   const onScanned = useCallback(
     ({ data, type }: { data: string; type: string }) => {
       if (!scanning || !debouncer.current.accept(data)) return;
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (haptics) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       void lookup(data, type);
     },
-    [lookup, scanning],
+    [lookup, scanning, haptics],
   );
   const close = () => setSheet({ kind: 'closed' });
 
@@ -191,7 +198,11 @@ export function ScanScreen() {
               router.push({ pathname: '/inventory', params: { q } });
             }}
             onLinked={(item) => setSheet({ kind: 'item', item, outcome: sheet.outcome })}
-            onCreate={close /* Create item flow lands in Milestone 6 behind canCreateItems. */}
+            onCreate={() => {
+              const c = sheet.outcome.barcode.gtin ?? sheet.outcome.barcode.cleaned;
+              close();
+              router.push({ pathname: '/create-item', params: { code: c } });
+            }}
           />
         ) : null}
       </Sheet>

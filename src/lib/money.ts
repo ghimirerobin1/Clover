@@ -14,6 +14,16 @@ export class Money {
     return `${sign}${symbol}${dollars}.${rem}`;
   }
 
+  /**
+   * Cents-masked price entry: digits shift in from the right ("3" → $0.03, "349" → $3.49).
+   * Anything but digits is ignored; capped at `max` cents. Returns integer cents.
+   */
+  static fromDigits(text: string, max = 100_000_000): number {
+    const digits = text.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 10);
+    const cents = digits ? Number(digits) : 0;
+    return Math.min(cents, max);
+  }
+
   /** Margin in basis points (e.g. 2750 = 27.50%), integer math only. null when price is 0. */
   static marginBps(priceCents: number, costCents: number): number | null {
     if (!Number.isSafeInteger(priceCents) || !Number.isSafeInteger(costCents)) {

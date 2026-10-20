@@ -37,6 +37,9 @@ export function PairingCard() {
     try {
       const res = await ProxyClient.pair(code, name);
       await DeviceKey.set(res.appKey);
+      const db = await AppDatabase.get();
+      await SettingsRepo.set(db, 'device_can_create', res.device.canCreateItems ? '1' : '0');
+      if (!res.device.canCreateItems) await SettingsRepo.set(db, 'create_items_enabled', '0');
       setCode('');
       setMessage(`Paired as “${res.device.name}”.`);
       void SyncController.sync({ full: true });

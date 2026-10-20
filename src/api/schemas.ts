@@ -75,3 +75,29 @@ export const AuditEntrySchema = z.object({
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 export const AuditPageSchema = z.object({ entries: z.array(AuditEntrySchema), nextBefore: z.number().int().nullable() });
 export type AuditPage = z.infer<typeof AuditPageSchema>;
+
+/** Gated create (spec §4.6). Price is integer cents; initial stock whole units. */
+export interface CreateItemRequest {
+  name: string;
+  priceCents: number;
+  code?: string;
+  sku?: string;
+  categoryId?: string;
+  initialStock?: number;
+  clientMutationId: string;
+}
+export const CreateItemResultSchema = z.object({
+  item: ItemSchema,
+  warnings: z.array(z.string()),
+  auditId: z.number().int(),
+  replayed: z.boolean(),
+});
+export type CreateItemResult = z.infer<typeof CreateItemResultSchema>;
+
+export const ThresholdMapSchema = z.object({
+  items: z.record(z.string(), z.number().int().nonnegative()),
+  categories: z.record(z.string(), z.number().int().nonnegative()),
+});
+export type ThresholdMap = z.infer<typeof ThresholdMapSchema>;
+export type ThresholdScope = 'item' | 'category';
+export type Device = z.infer<typeof DeviceSchema>;
