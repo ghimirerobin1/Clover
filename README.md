@@ -3,9 +3,9 @@
 Mobile inventory app (Expo / React Native) for a two-location grocery that uses **Clover POS as the
 system of record**, plus a thin FastAPI proxy that holds the Clover credentials.
 
-> **Status: Milestone 4 (Stock writes).** Skeleton, catalog, scanning, and Receive / Count / Adjust with the read-verify-write
-> protocol (fresh read, before → after confirmation, 409 re-confirm, Undo, Unconfirmed on unknown outcome) plus the Activity tab
-> from the server audit log. Offline queueing is Milestone 5: Apply is disabled offline.
+> **Status: Milestone 5 (Low Stock, continuous scan, batch, offline queue).** Skeleton, catalog, scanning, Receive / Count / Adjust with the
+> read-verify-write protocol, Activity, plus the Low Stock tab, continuous counting scan with Review & apply (batch confirmation, sequential writes),
+> and an offline intent queue (deltas only, never auto-flushed). Mock-mode e2e: `server/scripts/e2e_mock.py`.
 
 ## Architecture
 

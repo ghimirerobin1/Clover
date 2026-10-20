@@ -28,6 +28,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="item/[id]" options={{ title: 'Item', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="batch" options={{ title: 'Review & apply', headerBackTitle: 'Back' }} />
         </Stack>
         <StockSheetHost />
         <ToastHost />

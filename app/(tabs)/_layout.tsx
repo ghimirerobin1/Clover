@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
+import { LowStock, useLowStockCount } from '../../src/features/lowstock';
 import { Tokens } from '../../src/theme/tokens';
 
 /** Scan is the default tab (spec §4.1). */
@@ -8,6 +9,7 @@ export const unstable_settings = { initialRouteName: 'scan' };
 
 export default function TabsLayout() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+  const lowCount = useLowStockCount();
   return (
     <Tabs
       screenOptions={{
@@ -22,7 +24,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="scan" options={{ title: 'Scan' }} />
       <Tabs.Screen name="inventory" options={{ title: 'Inventory' }} />
-      <Tabs.Screen name="low-stock" options={{ title: 'Low Stock' }} />
+      <Tabs.Screen name="low-stock" options={{ title: 'Low Stock', tabBarBadge: LowStock.badge(lowCount.data ?? 0) }} />
       <Tabs.Screen name="activity" options={{ title: 'Activity' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>

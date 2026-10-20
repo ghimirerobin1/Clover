@@ -53,6 +53,8 @@ const SELECT = `
          i.modified_time, i.synced_at, i.last_counted_at
   FROM items i LEFT JOIN categories c ON c.id = i.category_id`;
 
+const LOW_STOCK_WHERE = 'i.stock_qty IS NOT NULL AND i.stock_qty <= COALESCE(i.low_stock_threshold, c.low_stock_threshold, ?)';
+
 const ORDER: Record<ItemSort, string> = {
   name: 'i.name COLLATE NOCASE ASC',
   stock_asc: 'i.stock_qty IS NULL, i.stock_qty ASC, i.name COLLATE NOCASE ASC',
@@ -137,6 +139,23 @@ export class ItemRepo {
       ORDER BY ${ORDER[q.sort ?? 'name']} LIMIT ?`;
     params.push(q.limit ?? 50_000);
     return db.all<ItemRow>(sql, params);
+  }
+
+  /** Low Stock (spec §4.5): tracked items with stock_qty <= resolved threshold, grouped-ready (category, then lowest stock). */
+  static async lowStock(db: SqlDb, globalThreshold: number): Promise<ItemRow[]> {
+    return db.all<ItemRow>(
+      `${SELECT} WHERE ${LOW_STOCK_WHERE}
+       ORDER BY c.name IS NULL, c.name COLLATE NOCASE, i.stock_qty ASC, i.name COLLATE NOCASE`,
+      [globalThreshold, globalThreshold],
+    );
+  }
+
+  static async lowStockCount(db: SqlDb, globalThreshold: number): Promise<number> {
+    const row = await db.first<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM items i LEFT JOIN categories c ON c.id = i.category_id WHERE ${LOW_STOCK_WHERE}`,
+      [globalThreshold],
+    );
+    return row?.n ?? 0;
   }
 
   static async byId(db: SqlDb, id: string, globalThreshold: number): Promise<ItemRow | null> {

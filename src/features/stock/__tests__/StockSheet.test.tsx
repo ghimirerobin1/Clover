@@ -124,6 +124,39 @@ describe('StockSheet (read-verify-write UI)', () => {
   });
 });
 
+describe('StockSheet offline queue', () => {
+  beforeEach(async () => {
+    mockDb.current = await WasmSqlDb.migrated();
+    await ItemRepo.upsertItems(mockDb.current, [item(14)], 1);
+    mockProxy.item.mockReset().mockRejectedValue(new ApiError('NETWORK', 'Network request failed', true));
+    mockProxy.writeStock.mockReset();
+  });
+  afterEach(async () => {
+    await act(async () => StockSheetController.close());
+    mockDb.current?.close();
+  });
+
+  it('queues a Receive as a delta (no write, no absolute value)', async () => {
+    await renderHost();
+    await act(async () => StockSheetController.open({ itemId: 'RICE', mode: 'edit', action: 'receive' }));
+    await waitFor(() => screen.getByText('Cached, may be stale'));
+    expect(screen.getByTestId('queue').props.accessibilityState).toMatchObject({ disabled: true }); // 0 → invalid
+    await fireEvent.changeText(screen.getByLabelText('Type quantity'), '24');
+    await fireEvent.press(screen.getByTestId('queue'));
+    const rows = await mockDb.current!.all<Record<string, unknown>>('SELECT item_id, action, delta, status FROM queued_intents');
+    expect(rows).toEqual([{ item_id: 'RICE', action: 'receive', delta: 24, status: 'queued' }]);
+    expect(mockProxy.writeStock).not.toHaveBeenCalled();
+  });
+
+  it('Count cannot be queued offline', async () => {
+    await renderHost();
+    await act(async () => StockSheetController.open({ itemId: 'RICE', mode: 'edit', action: 'count' }));
+    await waitFor(() => screen.getByText('Cached, may be stale'));
+    expect(screen.queryByTestId('queue')).toBeNull();
+    expect(screen.getByText(/Counts can’t be queued offline/)).toBeTruthy();
+  });
+});
+
 describe('ConfirmCard', () => {
   it('uses destructive styling when lower or zero', async () => {
     await render(<ConfirmCard intent={{ action: 'count', amount: 0 }} before={4} />);
@@ -150,6 +183,7 @@ describe('write paths', () => {
     const callers = (pattern: RegExp) =>
       files.filter((f) => pattern.test(readFileSync(f, 'utf8'))).map((f) => f.slice(root.length + 1)).sort();
     expect(callers(/\.writeStock\(/)).toEqual(['src/features/stock/StockWriter.ts']);
-    expect(callers(/StockWriter\.apply\(/)).toEqual(['src/features/stock/StockSheet.tsx']);
+    // The single confirmed write path: the stock sheet's Apply tap and the batch confirmation screen (via BatchRunner).
+    expect(callers(/StockWriter\.apply\(/)).toEqual(['src/features/batch/BatchRunner.ts', 'src/features/stock/StockSheet.tsx']);
   });
 });

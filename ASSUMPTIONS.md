@@ -97,3 +97,23 @@ Decisions not dictated by the spec. Each is the safest reasonable option.
   shown at the top of Activity until the user re-checks or dismisses it.
 - iOS cannot stack modals, so Scan closes its sheet and opens the stock sheet 350 ms later.
 - `expo-crypto` added for `randomUUID` (mutation ids).
+
+## Milestone 5 (Low Stock, continuous scan, batch apply, offline queue)
+- **No new write path.** Batch rows and queued intents are written one at a time through `StockWriter.apply` (the M4 read-verify-write path,
+  same server route, a fresh `clientMutationId` per row per confirmation tap). Only the stock sheet's Apply and the batch screen's Apply call it.
+- Low Stock = tracked items with `stock_qty <= COALESCE(item, category, global)`, including zero/negative ("out") items; untracked items excluded.
+  Grouped by category name (Uncategorized last), lowest stock first. The tab badge is the same count (hidden at 0, "99+" cap).
+- Continuous mode: found items go straight to the tally (no sheet); not-found / several-matches still open their sheets (pausing the camera);
+  picking a candidate adds it to the tally. The 1.2 s debounce is per identical code and slides while the code stays in view, so a held barcode
+  counts once. Tally rows support −1 and Remove.
+- The tally applies as **Count (set to tally)** by default — the mode is "counting" — with a toggle for **Receive (+tally)**.
+- Batch: the screen reads live stock for every row first (reads only), shows before → after (destructive tint when lower/zero), allows removing rows,
+  then writes sequentially. 409 rows show the new base and need another tap (Receive recomputes, Count keeps its number); failed rows stay for retry;
+  an unknown outcome marks the row Unconfirmed (also in Activity) and **stops** the batch, and that row is never re-sent from the batch.
+- Offline queue stores `(item, action, signed delta, reason, note)` only — the table has no expected/new quantity columns. Only Receive and Adjust can be
+  queued; Count is refused (an absolute number captured against stale stock is exactly what the spec forbids). Queued rows show at the top of Activity
+  with Discard and "Review & apply queued", which opens the batch confirmation against live stock. Nothing flushes automatically (no reconnect hook).
+- Queue entries close as `applied` (confirmed), `sent` (unknown outcome; tracked as Unconfirmed) or `discarded`; conflicts/failures stay queued.
+- Beep: a 70 ms 1760 Hz tone synthesized at runtime (no media file committed), cached to the app cache dir and played with expo-audio, mixing with
+  other audio and respecting the silent switch. The expo-audio plugin is configured with no microphone permission.
+

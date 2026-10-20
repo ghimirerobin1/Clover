@@ -1,16 +1,18 @@
 import { FlashList } from '@shopify/flash-list';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { ProxyClient } from '../../api/proxy';
 import { Badge, Button, EmptyState, Skeleton } from '../../components';
 import { AppDatabase } from '../../db/ExpoSqlDb';
+import { IntentQueueRepo, type QueuedIntentRow } from '../../db/intentQueue';
 import { ItemRepo } from '../../db/items';
 import { StockChangesRepo, type StockChangeRow } from '../../db/stockChanges';
 import { ApiError } from '../../lib/errors';
 import { SyncController } from '../../sync/SyncController';
-import { ACTION_LABEL } from '../stock';
+import { ACTION_LABEL, REASON_LABEL, StockMath } from '../stock';
 import { AuditRow } from './AuditRow';
 import { useAudit } from './useAudit';
 
@@ -86,8 +88,33 @@ function UnconfirmedRow({ row, onChanged }: { row: StockChangeRow; onChanged: ()
   );
 }
 
+export function QueuedRow({ row, onDiscard }: { row: QueuedIntentRow; onDiscard: () => void }) {
+  return (
+    <View className="flex-row items-center gap-2 border-b border-border bg-warning/10 px-4 py-3">
+      <View className="flex-1 gap-0.5">
+        <Text className="text-base font-medium text-text" numberOfLines={1}>
+          {row.item_name ?? row.item_id}
+        </Text>
+        <Text className="text-sm text-text-muted">
+          {ACTION_LABEL[row.action]} {StockMath.signed(row.delta)}
+          {row.reason ? ` · ${REASON_LABEL[row.reason]}` : ''} · queued {new Date(row.created_at).toLocaleString()}
+        </Text>
+      </View>
+      <Badge label="Queued" tone="warning" />
+      <Pressable accessibilityRole="button" accessibilityLabel={`Discard queued change for ${row.item_name ?? row.item_id}`} onPress={onDiscard} className="min-h-touch justify-center px-2">
+        <Text className="text-base text-danger">Discard</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 export function ActivityScreen() {
   const qc = useQueryClient();
+  const router = useRouter();
+  const queued = useQuery({
+    queryKey: ['local', 'queued'],
+    queryFn: async () => IntentQueueRepo.pending(await AppDatabase.get()),
+  });
   const [action, setAction] = useState<ActionFilter>('all');
   const [range, setRange] = useState<RangeFilter>('7d');
   const audit = useAudit({ action: action === 'all' ? undefined : action, since: ActivityFilters.since(range) });
@@ -98,6 +125,7 @@ export function ActivityScreen() {
   const refresh = () => {
     SyncController.bumpData();
     void qc.invalidateQueries({ queryKey: ['local', 'unconfirmed'] });
+    void qc.invalidateQueries({ queryKey: ['local', 'queued'] });
     void audit.refetch();
   };
 
@@ -113,6 +141,29 @@ export function ActivityScreen() {
         <Chip label="7 days" active={range === '7d'} onPress={() => setRange('7d')} />
         <Chip label="All time" active={range === 'all'} onPress={() => setRange('all')} />
       </ScrollView>
+      {(queued.data ?? []).length > 0 ? (
+        <View className="gap-0">
+          <View className="flex-row items-center justify-between px-4 py-2">
+            <Text className="text-base font-semibold text-text">Queued offline ({queued.data?.length})</Text>
+          </View>
+          {(queued.data ?? []).map((row) => (
+            <QueuedRow
+              key={row.id}
+              row={row}
+              onDiscard={() =>
+                void (async () => {
+                  await IntentQueueRepo.close(await AppDatabase.get(), row.id, 'discarded');
+                  refresh();
+                })()
+              }
+            />
+          ))}
+          <View className="px-4 pt-2">
+            {/* Never auto-flushed: this opens a confirmation with live before → after for each change. */}
+            <Button label="Review & apply queued" onPress={() => router.push({ pathname: '/batch', params: { source: 'queue' } })} testID="review-queued" />
+          </View>
+        </View>
+      ) : null}
       {(unconfirmed.data ?? []).map((row) => (
         <UnconfirmedRow key={row.id} row={row} onChanged={refresh} />
       ))}
