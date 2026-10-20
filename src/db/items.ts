@@ -188,6 +188,15 @@ export class ItemRepo {
     );
   }
 
+  /** Optimistic local update after a confirmed write (or a fresher live read). */
+  static async setLocalStock(db: SqlDb, itemId: string, qty: number, opts: { countedAt?: number } = {}): Promise<void> {
+    if (opts.countedAt != null) {
+      await db.run('UPDATE items SET stock_qty = ?, last_counted_at = ? WHERE id = ?', [qty, opts.countedAt, itemId]);
+    } else {
+      await db.run('UPDATE items SET stock_qty = ? WHERE id = ?', [qty, itemId]);
+    }
+  }
+
   /** Per-item threshold override; local only (not written to Clover). null clears it. */
   static async setThreshold(db: SqlDb, itemId: string, threshold: number | null): Promise<void> {
     if (threshold != null && (!Number.isInteger(threshold) || threshold < 0)) {

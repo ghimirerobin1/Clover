@@ -11,6 +11,7 @@ import { AppDatabase } from '../../db/ExpoSqlDb';
 import type { ItemRow } from '../../db/items';
 import { SettingsRepo } from '../../db/settings';
 import { Barcode } from '../../lib/barcode';
+import { StockSheetController } from '../stock';
 import { Keypad } from './Keypad';
 import { LookupChain, ScanDebouncer, type LookupOutcome } from './LookupChain';
 import { CandidateList, ItemSummary, NotFound } from './ScanSheets';
@@ -18,6 +19,7 @@ import { CandidateList, ItemSummary, NotFound } from './ScanSheets';
 /** Spec §1: EAN-13, EAN-8, UPC-A, UPC-E, Code128, Code39, QR. */
 export const BARCODE_TYPES: BarcodeType[] = ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'qr'];
 const ZOOM_STEP = 0.1;
+const MODAL_HANDOFF_MS = 350;
 
 type SheetState =
   | { kind: 'closed' }
@@ -128,6 +130,12 @@ export function ScanScreen() {
             item={sheet.item}
             barcode={sheet.outcome.barcode}
             onScanNext={close}
+            onAction={(action) => {
+              const id = sheet.item.id;
+              close();
+              // Let the scan sheet's modal dismiss before presenting the stock sheet (iOS can't stack modals).
+              setTimeout(() => StockSheetController.open({ itemId: id, mode: 'edit', action }), MODAL_HANDOFF_MS);
+            }}
             onDetails={() => {
               const id = sheet.item.id;
               close();

@@ -4,3 +4,4 @@ export { EmptyState } from './EmptyState';
 export { Sheet } from './Sheet';
 export { Skeleton } from './Skeleton';
 export { Stepper, StepperMath } from './Stepper';
+export { Toast, ToastHost, type ToastSpec } from './Toast';

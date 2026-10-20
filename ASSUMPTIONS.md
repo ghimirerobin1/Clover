@@ -80,3 +80,20 @@ Decisions not dictated by the spec. Each is the safest reasonable option.
 - Zoom uses −/+ buttons in 10 % steps (0–100 % of device max) instead of pinch. Torch is a toggle.
 - The scanned-item sheet is read-only (cached stock badge, "View details", "Scan next"); stock actions arrive in Milestone 4.
 - Camera permission string set via the `expo-camera` config plugin; microphone permission is not requested.
+
+## Milestone 4 (Stock writes)
+- One route `POST /locations/{loc}/stock/{id}` takes **absolute** `newQuantity` + `expectedQuantity`; the server re-reads live stock under a
+  per-(location, item) lock and returns 409 `CONFLICT` with `currentQuantity` on mismatch. Clover is always sent an absolute quantity.
+- Idempotency reuses the existing table: key = device + `clientMutationId`, hash covers path + body. Replays return the stored result
+  (`replayed: true`) or the stored 409. A write whose outcome is unknown keeps its id **pending** (a re-send gets CONFLICT, which the app treats as unknown).
+  429 releases the id. The app generates a new id per confirmation tap, so nothing is ever re-sent automatically.
+- Audit log rows carry `status` (`applied` / `conflict` / `rejected` / `unknown`), `item_name` and `note` (additive column migration).
+  `GET /locations/{loc}/audit` supports `itemId`, `action`, `since`, `before` (cursor) and `limit`.
+- Undo = a new write of the inverse delta (`action: undo`) against a freshly fetched base, through the same confirmation card; 409 on undo recomputes from the new base.
+- 409 recompute: Receive/Adjust/Undo keep the delta, Count keeps the absolute number (spec §4.4).
+- "Destructive" styling when the result is lower than before or ≤ 0.
+- Quantities are whole units in the app (Clover fractional stock is `VERIFY:`). Adjust needs a reason; nothing may go below zero.
+- Unknown outcome: the app re-fetches live stock once (no write), caches it, and records a local `stock_changes` row with status `unconfirmed`
+  shown at the top of Activity until the user re-checks or dismisses it.
+- iOS cannot stack modals, so Scan closes its sheet and opens the stock sheet 350 ms later.
+- `expo-crypto` added for `randomUUID` (mutation ids).

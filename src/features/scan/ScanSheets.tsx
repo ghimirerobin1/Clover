@@ -9,6 +9,7 @@ import { SettingsRepo } from '../../db/settings';
 import type { NormalizedBarcode } from '../../lib/barcode';
 import { Money } from '../../lib/money';
 import { Thresholds } from '../../lib/thresholds';
+import { ACTION_LABEL } from '../stock';
 
 class StockText {
   static label(qty: number | null): string {
@@ -29,17 +30,19 @@ export function WeightedNote({ barcode }: { barcode: NormalizedBarcode }) {
   );
 }
 
-/** Found: item summary. Read-only — stock actions arrive in Milestone 4. */
+/** Found: item summary + stock actions (each opens the confirmed stock sheet). */
 export function ItemSummary({
   item,
   barcode,
   onDetails,
   onScanNext,
+  onAction,
 }: {
   item: ItemRow;
   barcode: NormalizedBarcode;
   onDetails: () => void;
   onScanNext: () => void;
+  onAction?: (action: 'receive' | 'count' | 'adjust') => void;
 }) {
   const status = Thresholds.status(item.stock_qty, item.threshold);
   return (
@@ -55,7 +58,16 @@ export function ItemSummary({
         <Badge tone={Thresholds.tone(status)} label="Cached stock" />
       </View>
       <WeightedNote barcode={barcode} />
-      <Button label="View details" size="lg" onPress={onDetails} />
+      {onAction ? (
+        <View className="flex-row gap-2">
+          {(['receive', 'count', 'adjust'] as const).map((a) => (
+            <View key={a} className="flex-1">
+              <Button label={ACTION_LABEL[a]} size="lg" variant={a === 'receive' ? 'primary' : 'secondary'} onPress={() => onAction(a)} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <Button label="View details" variant="secondary" onPress={onDetails} />
       <Button label="Scan next" variant="secondary" onPress={onScanNext} />
     </View>
   );

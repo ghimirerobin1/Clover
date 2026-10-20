@@ -18,7 +18,7 @@ from .idempotency import IdempotencyStore
 from .mock import MOCK_BASE_URL, MockClover
 from .pairing import PairingService, PairingThrottle
 from .ratelimit import TokenBucket
-from .routes import catalog, health, pairing
+from .routes import catalog, health, pairing, stock
 
 
 class AppFactory:
@@ -80,6 +80,7 @@ class AppFactory:
         api.include_router(health.router)
         api.include_router(pairing.router)
         api.include_router(catalog.router)
+        api.include_router(stock.router)
         return api
 
 

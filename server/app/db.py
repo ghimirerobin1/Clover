@@ -74,6 +74,17 @@ class Database:
         finally:
             conn.close()
 
+    # Additive column migrations: (table, column, DDL). Append only.
+    COLUMNS: tuple[tuple[str, str, str], ...] = (
+        ("audit_log", "item_name", "TEXT"),
+        ("audit_log", "note", "TEXT"),
+        ("audit_log", "status", "TEXT NOT NULL DEFAULT 'applied'"),
+    )
+
     def migrate(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            for table, column, ddl in self.COLUMNS:
+                existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")

@@ -11,6 +11,7 @@ import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -22,6 +23,21 @@ from .ratelimit import TokenBucket
 from .timeutil import Clock
 
 MAX_BACKOFF_SEC = 30.0
+
+
+class WriteOutcome(StrEnum):
+    APPLIED = "applied"
+    REJECTED = "rejected"  # definite 4xx: nothing written
+    NOT_APPLIED = "not_applied"  # 429: nothing written
+    UNKNOWN = "unknown"  # transport failure / 5xx: may or may not have been written
+
+
+@dataclass(frozen=True)
+class SentWrite:
+    outcome: WriteOutcome
+    status_code: int | None
+    body: Any
+    error: ApiError | None
 
 
 @dataclass(frozen=True)
@@ -125,6 +141,26 @@ class CloverClient:
             raise ErrorMapper.from_status(resp.status_code, is_write=False, detail=self._detail(resp))
         raise AssertionError("unreachable")  # pragma: no cover
 
+    async def send_write(self, method: str, path: str, body: Any) -> SentWrite:
+        """One attempt, never retried, no idempotency bookkeeping. Classifies the outcome for the caller."""
+        url = self.merchant_path(path)
+        await self.limiter.acquire()
+        try:
+            resp = await self._http.request(method.upper(), url, json=body)
+        except httpx.TransportError as exc:
+            return SentWrite(WriteOutcome.UNKNOWN, None, None, ErrorMapper.from_transport(exc, is_write=True))
+        if resp.status_code == 429:
+            return SentWrite(WriteOutcome.NOT_APPLIED, 429, None, ErrorMapper.from_status(429, is_write=True))
+        if resp.status_code >= 500:
+            return SentWrite(
+                WriteOutcome.UNKNOWN, resp.status_code, None, ErrorMapper.from_status(resp.status_code, is_write=True)
+            )
+        payload = self._body(resp)
+        if not resp.is_success:
+            err = ErrorMapper.from_status(resp.status_code, is_write=True, detail=self._detail(resp))
+            return SentWrite(WriteOutcome.REJECTED, resp.status_code, payload, err)
+        return SentWrite(WriteOutcome.APPLIED, resp.status_code, payload, None)
+
     async def write(
         self,
         method: str,
@@ -136,37 +172,27 @@ class CloverClient:
         client_mutation_id: str,
     ) -> WriteResult:
         """Single attempt, never retried. A replay of a completed mutation returns the stored result."""
-        url = self.merchant_path(path)
-        req_hash = IdempotencyStore.request_hash(method, url, body)
+        req_hash = IdempotencyStore.request_hash(method, self.merchant_path(path), body)
         replay = idempotency.begin(device_id, client_mutation_id, req_hash)
         if replay is not None:
             if replay.status_code >= 400:
                 raise ErrorMapper.from_status(replay.status_code, is_write=True)
             return WriteResult(replay.status_code, replay.body, replayed=True)
 
-        await self.limiter.acquire()
         try:
-            resp = await self._http.request(method.upper(), url, json=body)
-        except httpx.TransportError as exc:
-            # Outcome unknown: keep the 'pending' row so a blind retry with the same id is refused.
-            raise ErrorMapper.from_transport(exc, is_write=True) from exc
+            sent = await self.send_write(method, path, body)
         except BaseException:
             idempotency.release(device_id, client_mutation_id)
             raise
-
-        if resp.status_code == 429:
+        if sent.outcome is WriteOutcome.NOT_APPLIED:
             # Definitely not applied: free the id so the user can re-confirm later.
             idempotency.release(device_id, client_mutation_id)
-            raise ErrorMapper.from_status(429, is_write=True)
-        if resp.status_code >= 500:
-            # Server error: outcome unknown, keep pending.
-            raise ErrorMapper.from_status(resp.status_code, is_write=True)
-
-        payload = self._body(resp)
-        idempotency.complete(device_id, client_mutation_id, resp.status_code, payload)
-        if not resp.is_success:
-            raise ErrorMapper.from_status(resp.status_code, is_write=True, detail=self._detail(resp))
-        return WriteResult(resp.status_code, payload, replayed=False)
+        elif sent.outcome is not WriteOutcome.UNKNOWN:
+            # Unknown outcome keeps the 'pending' row so a blind retry with the same id is refused.
+            idempotency.complete(device_id, client_mutation_id, sent.status_code or 0, sent.body)
+        if sent.error is not None:
+            raise sent.error
+        return WriteResult(sent.status_code or 200, sent.body, replayed=False)
 
 
 class CloverRegistry:

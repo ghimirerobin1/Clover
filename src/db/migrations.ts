@@ -73,6 +73,14 @@ const STEPS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  // v2 — local stock change log for unconfirmed / applied writes (spec §4.4, §4.7)
+  `
+  ALTER TABLE stock_changes ADD COLUMN item_name TEXT;
+  ALTER TABLE stock_changes ADD COLUMN note TEXT;
+  ALTER TABLE stock_changes ADD COLUMN live_qty REAL;
+  ALTER TABLE stock_changes ADD COLUMN resolved_at INTEGER;
+  CREATE INDEX stock_changes_status ON stock_changes (status, created_at);
+  `,
 ];
 
 export class Migrations {
