@@ -3,10 +3,10 @@
 Mobile inventory app (Expo / React Native) for a two-location grocery that uses **Clover POS as the
 system of record**, plus a thin FastAPI proxy that holds the Clover credentials.
 
-> **Status: Milestone 2 (Catalog).** On top of the skeleton (tabs, theme, primitives, pairing, Clover client,
-> mock mode): SQLite + FTS5 catalog, full + delta sync, Inventory list with search/filters/sort, Item detail,
-> in-app pairing, and a dev-only 15k seed. Scanning and stock writes arrive in Milestones 3–4.
-> Nothing in this milestone writes stock to Clover.
+> **Status: Milestone 3 (Scan).** Skeleton + catalog (SQLite/FTS5, sync, Inventory, Item detail) + barcode scanning:
+> full-screen camera with torch/zoom, barcode normalization (UPC-A/EAN-13/UPC-E/EAN-8, check digits, variable-weight),
+> local → proxy lookup chain, Not-found actions, manual keypad. Stock writes arrive in Milestone 4.
+> Nothing in this milestone writes stock to Clover. Scanning needs a dev build or Expo Go on a physical device.
 
 ## Architecture
 
@@ -107,7 +107,8 @@ setting name) or stock quantities will come back empty.
 
 All require `X-App-Key`. `GET /locations/default/items?limit=1..1000&offset&modifiedSince=<ms>` →
 `{items, offset, limit, hasMore}`; `GET /locations/default/items/{id}` (always fresh from Clover);
-`GET /locations/default/categories`.
+`GET /locations/default/categories`; `GET /locations/default/items/lookup?code=` → `{match, candidates}`
+(code incl. UPC-A/EAN-13 variant, then SKU).
 
 ## Performance notes (10k+ items)
 

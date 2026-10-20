@@ -18,9 +18,14 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite",
-      "expo-secure-store",
-      "expo-asset"
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Stockroom uses the camera to scan product barcodes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
     ]
   }
 }

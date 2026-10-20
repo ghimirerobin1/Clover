@@ -120,3 +120,38 @@ class Catalog:
             # VERIFY: delta filter syntax; also whether deleted items are returned (they are skipped otherwise).
             params["filter"] = f"modifiedTime>={modified_since}"
         return params
+
+
+class LookupResult(CamelModel):
+    match: ItemOut | None
+    candidates: list[ItemOut]
+
+
+class Lookup:
+    """Server-side lookup: exact `code` (UPC) first, then `sku` (spec §3)."""
+
+    MAX_CODE_LEN = 64
+
+    @staticmethod
+    def code_variants(code: str) -> list[str]:
+        """UPC-A <-> EAN-13 (leading 0) so either stored form matches."""
+        variants = [code]
+        if code.isdigit() and len(code) == 12:
+            variants.append(f"0{code}")
+        if code.isdigit() and len(code) == 13 and code.startswith("0"):
+            variants.append(code[1:])
+        return variants
+
+    @staticmethod
+    def filters(code: str) -> list[str]:
+        # VERIFY: Clover filter syntax `code=<v>` / `sku=<v>` on GET /items, and whether alternate barcodes
+        # are queryable at all (not used; app-side barcode_aliases cover alternates for now).
+        return [f"code={v}" for v in Lookup.code_variants(code)] + [f"sku={code}"]
+
+    @staticmethod
+    def result(found: list[ItemOut]) -> LookupResult:
+        live = [i for i in found if not i.deleted]
+        unique = list({i.id: i for i in live}.values())
+        if len(unique) == 1:
+            return LookupResult(match=unique[0], candidates=[])
+        return LookupResult(match=None, candidates=unique)

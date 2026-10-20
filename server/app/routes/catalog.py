@@ -5,8 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request
 
 from ..auth import CurrentDevice
-from ..catalog import ITEM_EXPAND, MAX_PAGE_SIZE, Catalog, CategoryList, ItemOut, ItemPage
+from ..catalog import ITEM_EXPAND, MAX_PAGE_SIZE, Catalog, CategoryList, ItemOut, ItemPage, Lookup, LookupResult
 from ..clover import CloverClient, CloverRegistry
+from ..errors import ErrorMapper
 
 router = APIRouter(prefix="/locations/{location_id}")
 
@@ -28,6 +29,27 @@ async def list_items(
     raw = await _clover(request, location_id).get("/items", Catalog.list_params(limit, offset, modified_since))
     items = [Catalog.item(e) for e in Catalog.elements(raw, "items")]
     return ItemPage(items=items, offset=offset, limit=limit, has_more=len(items) == limit)
+
+
+@router.get("/items/lookup", response_model=LookupResult, response_model_by_alias=True)
+async def lookup_item(
+    location_id: str,
+    request: Request,
+    _device: CurrentDevice,
+    code: Annotated[str, Query(min_length=1, max_length=Lookup.MAX_CODE_LEN)],
+) -> LookupResult:
+    """Match by code (UPC, incl. UPC-A/EAN-13 variants), then SKU. Unique hit -> match; several -> candidates."""
+    value = "".join(code.split())
+    if not value:
+        raise ErrorMapper.validation("code is required")
+    clover = _clover(request, location_id)
+    found: list[ItemOut] = []
+    for flt in Lookup.filters(value):
+        raw = await clover.get("/items", {"filter": flt, "expand": ITEM_EXPAND, "limit": 10})
+        found = [Catalog.item(e) for e in Catalog.elements(raw, "items")]
+        if found:
+            break
+    return Lookup.result(found)
 
 
 @router.get("/items/{item_id}", response_model=ItemOut, response_model_by_alias=True)
