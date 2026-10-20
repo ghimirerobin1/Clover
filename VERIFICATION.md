@@ -48,6 +48,9 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 | `server/app/catalog.py:147` | Lookup filter syntax `filter=code=<v>` / `filter=sku=<v>`; whether Clover exposes alternate barcodes to query (not used — local `barcode_aliases` cover alternates) |
 | `src/lib/barcode.ts` (spec, not Clover) | The store's actual variable-weight layout (prefix `2`, 5 item digits assumed; configurable via the `variable_weight_prefixes` setting) and how weighted items' `code` is stored in Clover |
 | `README.md` | Exact name of the "Track stock" item setting |
+| `server/app/stock.py:208` | `POST /v3/merchants/{mId}/item_stocks/{itemId}` with `{"quantity": N}` sets **absolute** stock (we send absolute, never deltas) |
+| `server/app/stock.py:155` | Whether Clover accepts fractional stock quantities (app only allows whole units; whole numbers are sent as ints) |
+| `server/app/stock.py` (live read) | `GET /items/{id}?expand=itemStock` reflects sales immediately (no read-after-write lag), which the expected-quantity check relies on |
 
 ## What the tests cover (Milestone 1)
 
@@ -72,6 +75,21 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 - **Lookup chain** (`src/features/scan/__tests__/LookupChain.test.ts`, WASM SQLite): local code (incl. EAN-13 and UPC-E forms) → sku (case-insensitive) → aliases → proxy (canonical code sent, hit cached into SQLite) → not found; duplicates → ambiguous; proxy/network errors reported, not thrown; empty input skips network; alias relinking; 1.2 s scan debounce.
 - **Scan sheets** (`ScanSheets.test.tsx`): Not-found sheet actions, Create hidden unless enabled, invalid-check-digit and offline warnings, link picker, weighted-item note, keypad.
 - **Server lookup** (`server/tests/test_lookup_route.py`): auth; match by UPC, by EAN-13 form of stored UPC-A, by SKU; not found; duplicates → `candidates`; `/items/lookup` not shadowed by `/items/{id}`; validation; real-mode query order `code` → `code` variant → `sku`.
+
+## Milestone 4 (Stock writes) coverage
+
+- `server/tests/test_stock_routes.py` (15): auth; applied write + audit row; 409 with `currentQuantity` and a `conflict` audit row, no upstream write;
+  idempotent replay (same `clientMutationId` → same result, `replayed: true`, **one** upstream call); replayed 409; id reuse with a different body;
+  ids scoped per device; validation (reason required for adjust, ranges); untracked/missing item; audit filters + pagination;
+  transport failure / 5xx → unknown, audit `unknown`, no retry, id stays pending; 429 frees the id; absolute body `{"quantity": 9}`; audit column migration.
+- `src/features/stock/__tests__/StockMath.test.ts`: target, **409 rebase rules** (Receive/Adjust/Undo recompute from new base, Count keeps absolute),
+  destructive styling rule, validation, undo inverse.
+- `src/features/stock/__tests__/StockWriter.test.ts` (WasmSqlDb + fake proxy): applied → optimistic SQLite + `last_counted_at` on Count;
+  conflict → live cached, nothing written, re-confirm with a new mutation id; **unknown outcome** (NETWORK / UPSTREAM / pending CONFLICT / non-ApiError)
+  → Unconfirmed row + re-fetched live, exactly one write call; failures classified; invalid intents never hit the network; undo incl. 409 on undo.
+- `src/features/stock/__tests__/StockSheet.test.tsx`: sheet fetches fresh stock on open; **no write before the Apply tap**; offline disables Apply;
+  409 shows live value and needs a second tap; unknown shows Unconfirmed with Apply disabled; ConfirmCard destructive styling;
+  a source scan asserting only `StockWriter` calls `writeStock` and only `StockSheet` calls `StockWriter.apply`.
 
 ## Manual test script
 
@@ -101,12 +119,18 @@ Milestone 1 scope:
 4. Toggle device dark mode → colors switch (tabs + screens).
 5. Pair via CLI + `/pair`; `/me` with key → 200, without → 401 `AUTH`.
 
-Later milestones (not testable yet): scan found / not found / variable-weight, receive, count, adjust,
-409 conflict, network drop mid-write, offline queue, undo, 15k-item seed performance.
+Milestone 4 (mock mode):
+6. Item detail → Receive → +24 → card shows "Current 14 → New 38" → Apply → haptic, toast with Undo; Activity tab shows the row.
+7. Tap Undo within 10 s → a new confirmation "38 → 14" (red) → Apply.
+8. Open Count, then change stock out of band (`curl` the mock/another device), Apply → "Stock changed to X… Set to N?" → Re-confirm.
+9. Open a sheet, stop the proxy → Apply disabled ("Cached, may be stale"). Kill the proxy *during* Apply → "Unconfirmed"; Activity lists it with Re-check / Dismiss; nothing retries.
+10. Adjust −N below zero → blocked; Adjust without a reason → blocked.
+
+Later milestones: offline intent queue, batch apply, continuous count mode, 15k-item seed performance on device.
 
 ## Known gaps / stubs
 
-- No stock-write or create-item routes yet (Milestones 4–6). "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
+- Create-item route not yet (Milestone 6). Offline intent queue / batch apply are Milestone 5: offline simply disables Apply. "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
 - Continuous (counting) scan mode is Milestone 5; only single mode exists.
 - No settings UI yet for the variable-weight prefix rule (stored setting `variable_weight_prefixes`, default `2`).
 - Beep/haptics preferences are not configurable yet; haptics are always on.
@@ -114,8 +138,11 @@ Later milestones (not testable yet): scan found / not found / variable-weight, r
 - Scan → sheet latency (< 300 ms target) not yet measured on a device.
 - Per-item thresholds are stored **locally only**; the spec also wants them on the proxy — deferred (no proxy route yet).
 - Category default thresholds have a column but no editor UI yet (Milestone 5 / Settings).
-- `last_counted_at` is never set until Count lands (Milestone 4), so "Not counted 30d" currently matches everything.
-- Stock history on item detail is a placeholder until the audit log (Milestone 4).
+- `last_counted_at` is set by local Counts only (not by counts from other devices until a sync rule exists).
+- Stock history / Activity show only writes made through this proxy (Clover sales are not in the audit log).
+- Unconfirmed rows are resolved manually (Re-check / Dismiss); there is no automatic reconciliation against the audit log yet.
+- Undo toast lives 10 s in memory only; it does not survive an app restart.
+- Per-item write lock is in-process (one proxy worker assumed).
 - Sync progress shows item count with an indeterminate bar (Clover gives no total count).
 - Offline detection is inferred from the last sync failing with a network error (no NetInfo dependency).
 - Not yet measured on a device: cold start, scroll fps, 10k full-sync time.

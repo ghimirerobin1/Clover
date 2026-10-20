@@ -3,10 +3,9 @@
 Mobile inventory app (Expo / React Native) for a two-location grocery that uses **Clover POS as the
 system of record**, plus a thin FastAPI proxy that holds the Clover credentials.
 
-> **Status: Milestone 3 (Scan).** Skeleton + catalog (SQLite/FTS5, sync, Inventory, Item detail) + barcode scanning:
-> full-screen camera with torch/zoom, barcode normalization (UPC-A/EAN-13/UPC-E/EAN-8, check digits, variable-weight),
-> local → proxy lookup chain, Not-found actions, manual keypad. Stock writes arrive in Milestone 4.
-> Nothing in this milestone writes stock to Clover. Scanning needs a dev build or Expo Go on a physical device.
+> **Status: Milestone 4 (Stock writes).** Skeleton, catalog, scanning, and Receive / Count / Adjust with the read-verify-write
+> protocol (fresh read, before → after confirmation, 409 re-confirm, Undo, Unconfirmed on unknown outcome) plus the Activity tab
+> from the server audit log. Offline queueing is Milestone 5: Apply is disabled offline.
 
 ## Architecture
 

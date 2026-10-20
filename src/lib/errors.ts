@@ -8,6 +8,8 @@ export class ApiError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly status?: number,
+    /** Present on stock-write 409s: the live Clover quantity the write was rejected against. */
+    readonly currentQuantity?: number,
   ) {
     super(message);
     this.name = 'ApiError';

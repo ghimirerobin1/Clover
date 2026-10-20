@@ -7,6 +7,11 @@ import {
   ItemPageSchema,
   ItemSchema,
   LookupResultSchema,
+  AuditPageSchema,
+  StockWriteResultSchema,
+  type AuditPage,
+  type StockWriteRequest,
+  type StockWriteResult,
   PairResultSchema,
   type ItemPage,
   type LookupResult,
@@ -31,6 +36,7 @@ const ErrorBodySchema = z.object({
     code: z.enum(API_ERROR_CODES),
     message: z.string(),
     retryable: z.boolean(),
+    currentQuantity: z.number().optional(),
   }),
 });
 
@@ -82,6 +88,30 @@ export class ProxyClient {
     return LookupResultSchema.parse(body);
   }
 
+  /**
+   * Absolute stock write guarded by expectedQuantity. Single attempt — callers must never retry automatically.
+   * Only StockWriter calls this, and only after the user taps a before → after confirmation.
+   */
+  static async writeStock(itemId: string, body: StockWriteRequest, opts: RequestOptions = {}): Promise<StockWriteResult> {
+    const res = await ProxyClient.request(
+      'POST',
+      `/locations/${DEFAULT_LOCATION}/stock/${encodeURIComponent(itemId)}`,
+      opts,
+      body,
+    );
+    return StockWriteResultSchema.parse(res);
+  }
+
+  static async audit(
+    params: { itemId?: string; action?: string; since?: string; before?: number; limit?: number } = {},
+    opts: RequestOptions = {},
+  ): Promise<AuditPage> {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, String(v));
+    const body = await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/audit?${q.toString()}`, opts);
+    return AuditPageSchema.parse(body);
+  }
+
   static async categories(opts: RequestOptions = {}): Promise<RemoteCategory[]> {
     const body = await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/categories`, opts);
     return CategoryListSchema.parse(body).categories;
@@ -112,8 +142,8 @@ export class ProxyClient {
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(body);
       if (parsed.success) {
-        const { code, message, retryable } = parsed.data.error;
-        throw new ApiError(code, message, retryable, res.status);
+        const { code, message, retryable, currentQuantity } = parsed.data.error;
+        throw new ApiError(code, message, retryable, res.status, currentQuantity);
       }
       throw new ApiError('UPSTREAM', `Unexpected response (${res.status})`, res.status >= 500, res.status);
     }

@@ -10,6 +10,8 @@ import { ApiError } from '../../lib/errors';
 import { Money } from '../../lib/money';
 import { Thresholds } from '../../lib/thresholds';
 import { SyncController } from '../../sync/SyncController';
+import { AuditRow, useAudit } from '../activity';
+import { ACTION_LABEL, StockSheetController } from '../stock';
 import { ItemFormat } from './ItemListRow';
 import { useFreshItem, useLocalItem } from './useItems';
 
@@ -42,6 +44,28 @@ export class ThresholdInput {
     if (t === '') return null;
     return /^\d{1,6}$/.test(t) ? Number(t) : undefined;
   }
+}
+
+/** Stock history from the server audit log (all devices). */
+function StockHistory({ itemId }: { itemId: string }) {
+  const audit = useAudit({ itemId, limit: 20 });
+  if (audit.isPending) return <Skeleton lines={3} height={40} />;
+  if (audit.isError) {
+    return (
+      <View className="gap-2">
+        <Text className="text-base text-text-muted">Couldn’t load history (offline?).</Text>
+        <Button label="Retry" variant="secondary" onPress={() => void audit.refetch()} />
+      </View>
+    );
+  }
+  if (audit.data.entries.length === 0) return <Text className="text-base text-text-muted">No stock changes recorded yet.</Text>;
+  return (
+    <View className="-mx-4">
+      {audit.data.entries.map((e) => (
+        <AuditRow key={e.id} entry={e} showItem={false} />
+      ))}
+    </View>
+  );
 }
 
 export function ItemDetailScreen({ id }: { id: string }) {
@@ -92,7 +116,17 @@ export function ItemDetailScreen({ id }: { id: string }) {
           </Text>
         ) : null}
         <Text className="text-sm text-text-muted">Low-stock threshold: {item.threshold}</Text>
-        <Text className="text-sm text-text-muted">Receive / Count / Adjust arrive in Milestone 4.</Text>
+        <View className="mt-2 flex-row gap-2">
+          {(['receive', 'count', 'adjust'] as const).map((action) => (
+            <View key={action} className="flex-1">
+              <Button
+                label={ACTION_LABEL[action]}
+                variant={action === 'receive' ? 'primary' : 'secondary'}
+                onPress={() => StockSheetController.open({ itemId: id, mode: 'edit', action })}
+              />
+            </View>
+          ))}
+        </View>
       </Card>
 
       <Card title="Details">
@@ -136,7 +170,7 @@ export function ItemDetailScreen({ id }: { id: string }) {
       </Card>
 
       <Card title="Stock history">
-        <Text className="text-base text-text-muted">The audit log arrives with stock writes in Milestone 4.</Text>
+        <StockHistory itemId={id} />
       </Card>
     </ScrollView>
   );
