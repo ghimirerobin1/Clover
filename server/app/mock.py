@@ -59,6 +59,11 @@ class MockClover:
         limit = min(int(params.get("limit", "100")), MAX_LIMIT)
         offset = int(params.get("offset", "0"))
         rows = sorted(self.items.values(), key=lambda i: i["id"])
+        # VERIFY: Clover filter syntax `filter=modifiedTime>=<ms>` for delta sync.
+        for f in params.get_list("filter"):
+            if m := re.fullmatch(r"modifiedTime>=(\d+)", f):
+                since = int(m.group(1))
+                rows = [r for r in rows if int(r.get("modifiedTime", 0)) >= since]
         return self._json(200, {"elements": copy.deepcopy(rows[offset : offset + limit])})
 
     def _item_stock(self, request: httpx.Request, item_id: str) -> httpx.Response:
