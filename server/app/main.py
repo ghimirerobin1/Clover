@@ -18,14 +18,15 @@ from .idempotency import IdempotencyStore
 from .mock import MOCK_BASE_URL, MockClover
 from .pairing import PairingService, PairingThrottle
 from .ratelimit import TokenBucket
-from .routes import health, pairing
+from .routes import catalog, health, pairing
 
 
 class AppFactory:
     @staticmethod
-    def clover_registry(settings: Settings, transport: httpx.AsyncBaseTransport | None) -> CloverRegistry:
+    def clover_registry(
+        settings: Settings, transport: httpx.AsyncBaseTransport | None, mock: MockClover | None
+    ) -> CloverRegistry:
         # One bucket per token: Clover limits are per token. VERIFY: per-token vs per-merchant limits.
-        mock = MockClover() if settings.clover_mock and transport is None else None
 
         def factory(location_id: str) -> CloverClient | None:
             loc = settings.location(location_id)
@@ -48,7 +49,8 @@ class AppFactory:
         cfg.validate_for_startup()
         db = Database(cfg.database_path)
         db.migrate()
-        registry = AppFactory.clover_registry(cfg, transport)
+        mock = MockClover() if cfg.clover_mock and transport is None else None
+        registry = AppFactory.clover_registry(cfg, transport, mock)
 
         @asynccontextmanager
         async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -62,6 +64,7 @@ class AppFactory:
         api.state.pairing_throttle = PairingThrottle(cfg.pairing_max_failures_per_min)
         api.state.idempotency = IdempotencyStore(db)
         api.state.clover = registry
+        api.state.mock_clover = mock  # exposed for tests / dev tooling; None outside mock mode
 
         @api.exception_handler(ApiError)
         async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -76,6 +79,7 @@ class AppFactory:
 
         api.include_router(health.router)
         api.include_router(pairing.router)
+        api.include_router(catalog.router)
         return api
 
 

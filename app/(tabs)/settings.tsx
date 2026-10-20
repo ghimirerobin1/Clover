@@ -3,6 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 
 import { ProxyClient, type Health } from '../../src/api/proxy';
 import { Badge, Button, Skeleton } from '../../src/components';
+import { DevSeedCard, PairingCard, SyncCard } from '../../src/features/inventory/CatalogSettings';
 import { ApiError } from '../../src/lib/errors';
 
 type HealthState = { kind: 'loading' } | { kind: 'ok'; health: Health } | { kind: 'error'; message: string };
@@ -57,9 +58,9 @@ export default function SettingsScreen() {
         ) : null}
         <Button label="Check again" variant="secondary" onPress={retry} />
       </View>
-      <Text className="text-base text-text-muted">
-        Device pairing, sync and preferences arrive in later milestones.
-      </Text>
+      <PairingCard />
+      <SyncCard />
+      <DevSeedCard />
     </ScrollView>
   );
 }

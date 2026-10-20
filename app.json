@@ -6,9 +6,21 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "ios": { "supportsTablet": true, "bundleIdentifier": "com.ghimire.stockroom" },
-    "android": { "package": "com.ghimire.stockroom" },
-    "web": { "bundler": "metro" },
-    "plugins": ["expo-router"]
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ghimire.stockroom"
+    },
+    "android": {
+      "package": "com.ghimire.stockroom"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-asset"
+    ]
   }
 }

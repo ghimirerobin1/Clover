@@ -3,9 +3,10 @@
 Mobile inventory app (Expo / React Native) for a two-location grocery that uses **Clover POS as the
 system of record**, plus a thin FastAPI proxy that holds the Clover credentials.
 
-> **Status: Milestone 1 (Skeleton).** Tabs, theme, design primitives, proxy with `/health`,
-> device pairing, Clover client and mock mode. Catalog, scanning and stock writes arrive in
-> Milestones 2–4 (see the build spec). Nothing in this milestone writes stock from the app.
+> **Status: Milestone 2 (Catalog).** On top of the skeleton (tabs, theme, primitives, pairing, Clover client,
+> mock mode): SQLite + FTS5 catalog, full + delta sync, Inventory list with search/filters/sort, Item detail,
+> in-app pairing, and a dev-only 15k seed. Scanning and stock writes arrive in Milestones 3–4.
+> Nothing in this milestone writes stock to Clover.
 
 ## Architecture
 
@@ -69,7 +70,8 @@ uv run python -m app.pair --revoke <device-id>
 
 The app redeems the code via `POST /pair {"code","deviceName"}` and gets an `appKey` once; only its
 SHA-256 hash is stored. Every later request sends `X-App-Key`. `GET /me` checks a key.
-(The in-app pairing screen lands with Settings in a later milestone; `/pair` is usable today.)
+In the app: **Settings → Pair this device**, enter the code and a device name. The key is kept in the OS
+secure store and a full catalog sync starts.
 
 ## Run the app
 
@@ -101,11 +103,21 @@ cd server && uv run ruff check . && uv run mypy app tests && uv run pytest   # s
 **Track stock:** items must have stock tracking enabled in Clover Inventory ("Track stock" — VERIFY exact
 setting name) or stock quantities will come back empty.
 
+## Catalog API (proxy)
+
+All require `X-App-Key`. `GET /locations/default/items?limit=1..1000&offset&modifiedSince=<ms>` →
+`{items, offset, limit, hasMore}`; `GET /locations/default/items/{id}` (always fresh from Clover);
+`GET /locations/default/categories`.
+
 ## Performance notes (10k+ items)
 
-Planned for Milestone 2: list/search screens read only from on-device SQLite (FTS5 for search,
-FlashList for rendering); the network only refreshes SQLite via full + delta sync (`modifiedSince`).
-That is why scrolling and search do not depend on connectivity or Clover latency.
+- List, search and filter screens read **only** from on-device SQLite; the network only refreshes SQLite.
+  So scrolling and search don't depend on connectivity or Clover latency.
+- First run: full sync paged at 1000, written in transactions of 500, with a progress count. Afterwards: delta sync by
+  `modifiedSince` on launch, foreground, every 10 min, and pull-to-refresh. Header shows "Synced N min ago" and an amber
+  banner when offline or > 1 h stale.
+- Search uses an FTS5 prefix index on name/SKU/UPC (measured median 3 ms over 15k items in tests). Lists render with FlashList.
+- Settings → Developer → **Seed 15,000 fake items** (dev builds only) for on-device testing.
 
 ## Future modules (seams)
 

@@ -1,4 +1,4 @@
-# Assumptions (Milestone 1)
+# Assumptions (Milestones 1–2)
 
 Decisions not dictated by the spec. Each is the safest reasonable option.
 
@@ -37,3 +37,25 @@ Decisions not dictated by the spec. Each is the safest reasonable option.
 - Mock mode uses `httpx.MockTransport` over in-memory fixtures (`server/app/fixtures`), so the real
   client code path (auth header, rate limit, mapping, idempotency) is exercised.
 - Python dependency management with `uv` (`pyproject.toml`); plain pip also works.
+
+## Milestone 2 (Catalog)
+- **Server item shape** (`ItemOut`): `id, name, sku, code, priceCents, costCents, categoryId, stockQty, modifiedTime, deleted`.
+  `stockQty: null` means stock is not tracked in Clover. Only the first category is used as `categoryId`.
+- Non-integer `price`/`cost` from Clover is rejected (`UPSTREAM`), never coerced, so float bugs surface.
+- Delta cursor = **max `modifiedTime` seen** (Clover's clock), queried with `>=` (inclusive; re-upserts are harmless). The device clock is never used for the cursor.
+- The cursor only advances after every page succeeds; a failed sync is simply re-run.
+- Full sync removes local items not seen in that sync (`synced_at < this sync`). Delta sync relies on Clover returning `deleted: true`
+  rows; if it doesn't (VERIFY), deletions are picked up on the next full re-sync (Settings → Full re-sync).
+- Local overrides (`low_stock_threshold`, `last_counted_at`) are preserved across sync upserts.
+- FTS5 external-content table over `items` kept in sync by triggers; tokenizer `unicode61 remove_diacritics 2`.
+  User input is tokenized on non-alphanumerics and each token becomes a quoted prefix term (AND), so FTS operators can't be injected.
+- "Low" filter = `0 < qty ≤ threshold`; "Out" = `qty ≤ 0`; untracked items appear only under "All".
+- The inventory list loads all matching rows (only list columns) into memory and lets FlashList virtualize; fine at 15k rows.
+- `SqlDb` interface wraps expo-sqlite (`ExpoSqlDb`) so the same SQL is tested under Jest with `node-sqlite3-wasm` (FTS5 enabled);
+  `better-sqlite3` couldn't build here and `sql.js` lacks FTS5.
+- `withTransactionAsync` (non-exclusive) is used because callbacks run on the same connection; sync is single-flight.
+- The device key is stored in `expo-secure-store`. A minimal pairing form lives in Settings (needed to sync); full Settings polish is Milestone 6.
+- Seeded fake items (`SEED_*`) are local only and are removed by the next full re-sync. The seed button renders only in `__DEV__`.
+- Sync triggers: app launch, foreground, every 10 min while active, pull-to-refresh, Settings buttons. Successful sync bumps a
+  `dataVersion` in a zustand store, which is part of every SQLite-backed TanStack Query key.
+- `expo-asset` was added because `expo-sqlite` requires it at runtime.
