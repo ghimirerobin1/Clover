@@ -1,7 +1,12 @@
 import { DEFAULT_GLOBAL_THRESHOLD } from '../lib/thresholds';
 import type { SqlDb } from './driver';
 
-export type SettingKey = 'last_synced_at' | 'synced_through_modified' | 'global_low_stock_threshold';
+export type SettingKey =
+  | 'last_synced_at'
+  | 'synced_through_modified'
+  | 'global_low_stock_threshold'
+  | 'variable_weight_prefixes'
+  | 'create_items_enabled';
 
 export class SettingsRepo {
   static async get(db: SqlDb, key: SettingKey): Promise<string | null> {

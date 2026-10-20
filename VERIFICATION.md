@@ -45,6 +45,8 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 | `server/app/catalog.py:120` | Delta filter syntax; whether deleted items are returned by the delta query at all |
 | `server/app/routes/catalog.py:42` | Category page size (assumes < 1000 categories) |
 | `src/sync/CatalogSync.ts:33` | Client page size matches the proxy/Clover max (1000) |
+| `server/app/catalog.py:147` | Lookup filter syntax `filter=code=<v>` / `filter=sku=<v>`; whether Clover exposes alternate barcodes to query (not used — local `barcode_aliases` cover alternates) |
+| `src/lib/barcode.ts` (spec, not Clover) | The store's actual variable-weight layout (prefix `2`, 5 item digits assumed; configurable via the `variable_weight_prefixes` setting) and how weighted items' `code` is stored in Clover |
 | `README.md` | Exact name of the "Track stock" item setting |
 
 ## What the tests cover (Milestone 1)
@@ -64,7 +66,23 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
 - **Sync** (`src/sync/__tests__/CatalogSync.test.ts`): full sync paged at 1000 with progress; empty-final-page stop; delta cursor = max server `modifiedTime`; deletions; full re-sync prunes vanished items; failure mid-sync doesn't advance the cursor; single-flight; staleness text.
 - **Search latency**: 15,000 seeded items, 21 queries — median **3.0 ms**, p95 **11 ms** on this box (WASM SQLite in Node, so only indicative of device performance). Test asserts median < 50 ms.
 
+## Milestone 3 (Scan) coverage
+
+- **Barcode normalization** (`src/lib/__tests__/barcode.test.ts`, 42 tests): whitespace/invisible-char cleanup; GTIN check digits (UPC-A, EAN-13, EAN-8, GTIN-14) valid + invalid; UPC-E → UPC-A for every last-digit rule (0–2, 3, 4, 5–9), 6/7/8-digit forms, bad number systems; UPC-A ↔ EAN-13 (leading 0) candidates; ambiguous 8-digit EAN-8 vs UPC-E; GTIN-14 wrapper; non-GTIN pass-through; variable-weight detection, item-portion lookup that ignores the embedded price, EAN-13 form, configurable prefix rule, `parseRule`.
+- **Lookup chain** (`src/features/scan/__tests__/LookupChain.test.ts`, WASM SQLite): local code (incl. EAN-13 and UPC-E forms) → sku (case-insensitive) → aliases → proxy (canonical code sent, hit cached into SQLite) → not found; duplicates → ambiguous; proxy/network errors reported, not thrown; empty input skips network; alias relinking; 1.2 s scan debounce.
+- **Scan sheets** (`ScanSheets.test.tsx`): Not-found sheet actions, Create hidden unless enabled, invalid-check-digit and offline warnings, link picker, weighted-item note, keypad.
+- **Server lookup** (`server/tests/test_lookup_route.py`): auth; match by UPC, by EAN-13 form of stored UPC-A, by SKU; not found; duplicates → `candidates`; `/items/lookup` not shadowed by `/items/{id}`; validation; real-mode query order `code` → `code` variant → `sku`.
+
 ## Manual test script
+
+Milestone 3 (Scan) — needs a physical device (camera):
+1. Scan tab asks for camera permission; deny → "Camera access needed" with manual entry.
+2. Allow → full-screen camera with viewfinder; toggle torch; zoom −/+/reset.
+3. Scan a fixture-coded item (or print UPC `074410000123`) → haptic → item sheet with name, price, cached stock, "View details".
+4. Scan a code not in the catalog → proxy lookup → Not found sheet: Search manually (opens Inventory pre-searched), Link to existing item (pick one; rescan → found via alias). "Create in Clover" is not shown (disabled by default).
+5. Variable-weight: enter `201234012999`-style code (prefix 2) on the keypad → Pork Belly + "Weighted item — stock tracked by unit".
+6. Holding the same barcode in view does not reopen the sheet repeatedly (1.2 s debounce; scanning paused while a sheet is open).
+7. Enter code manually → keypad → Look up. No stock writes anywhere.
 
 Milestone 2 (Catalog):
 1. Proxy in mock mode; in the app go to Settings → enter a code from `python -m app.pair` + device name → Pair. A full sync starts automatically.
@@ -88,7 +106,12 @@ Later milestones (not testable yet): scan found / not found / variable-weight, r
 
 ## Known gaps / stubs
 
-- No lookup, stock-write or create-item routes yet (Milestones 3–6).
+- No stock-write or create-item routes yet (Milestones 4–6). "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
+- Continuous (counting) scan mode is Milestone 5; only single mode exists.
+- No settings UI yet for the variable-weight prefix rule (stored setting `variable_weight_prefixes`, default `2`).
+- Beep/haptics preferences are not configurable yet; haptics are always on.
+- Barcode aliases are local only (per spec); they are not synced between devices.
+- Scan → sheet latency (< 300 ms target) not yet measured on a device.
 - Per-item thresholds are stored **locally only**; the spec also wants them on the proxy — deferred (no proxy route yet).
 - Category default thresholds have a column but no editor UI yet (Milestone 5 / Settings).
 - `last_counted_at` is never set until Count lands (Milestone 4), so "Not counted 30d" currently matches everything.

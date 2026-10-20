@@ -30,3 +30,6 @@ export const CategoryListSchema = z.object({ categories: z.array(CategorySchema)
 export const DeviceSchema = z.object({ id: z.string(), name: z.string(), canCreateItems: z.boolean() });
 export const PairResultSchema = z.object({ appKey: z.string().min(16), device: DeviceSchema });
 export type PairResult = z.infer<typeof PairResultSchema>;
+
+export const LookupResultSchema = z.object({ match: ItemSchema.nullable(), candidates: z.array(ItemSchema) });
+export type LookupResult = z.infer<typeof LookupResultSchema>;

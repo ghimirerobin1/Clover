@@ -6,8 +6,10 @@ import {
   CategoryListSchema,
   ItemPageSchema,
   ItemSchema,
+  LookupResultSchema,
   PairResultSchema,
   type ItemPage,
+  type LookupResult,
   type PairResult,
   type RemoteCategory,
   type RemoteItem,
@@ -71,6 +73,13 @@ export class ProxyClient {
   static async item(id: string, opts: RequestOptions = {}): Promise<RemoteItem> {
     const body = await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/items/${encodeURIComponent(id)}`, opts);
     return ItemSchema.parse(body);
+  }
+
+  /** Proxy-side lookup by code (UPC/EAN variants) then SKU. */
+  static async lookup(code: string, opts: RequestOptions = {}): Promise<LookupResult> {
+    const q = new URLSearchParams({ code });
+    const body = await ProxyClient.request('GET', `/locations/${DEFAULT_LOCATION}/items/lookup?${q.toString()}`, opts);
+    return LookupResultSchema.parse(body);
   }
 
   static async categories(opts: RequestOptions = {}): Promise<RemoteCategory[]> {

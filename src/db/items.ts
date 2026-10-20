@@ -156,6 +156,38 @@ export class ItemRepo {
     return rows.map((r) => r.barcode);
   }
 
+  /** Exact match on Clover `code` for any of the candidate forms. */
+  static async findByCodes(db: SqlDb, codes: readonly string[], globalThreshold: number): Promise<ItemRow[]> {
+    if (codes.length === 0) return [];
+    return db.all<ItemRow>(`${SELECT} WHERE i.code IN (${codes.map(() => '?').join(',')}) ORDER BY i.name`, [
+      globalThreshold,
+      ...codes,
+    ]);
+  }
+
+  static async findBySku(db: SqlDb, sku: string, globalThreshold: number): Promise<ItemRow[]> {
+    if (!sku) return [];
+    return db.all<ItemRow>(`${SELECT} WHERE i.sku = ? COLLATE NOCASE ORDER BY i.name`, [globalThreshold, sku]);
+  }
+
+  static async findByAliases(db: SqlDb, codes: readonly string[], globalThreshold: number): Promise<ItemRow[]> {
+    if (codes.length === 0) return [];
+    return db.all<ItemRow>(
+      `${SELECT} WHERE i.id IN (SELECT item_id FROM barcode_aliases WHERE barcode IN (${codes.map(() => '?').join(',')}))
+       ORDER BY i.name`,
+      [globalThreshold, ...codes],
+    );
+  }
+
+  /** Local-only alias (spec §4.3 "Link to existing item"). Re-linking a barcode moves it. */
+  static async addAlias(db: SqlDb, barcode: string, itemId: string): Promise<void> {
+    if (!barcode) throw new RangeError('barcode is required');
+    await db.run(
+      'INSERT INTO barcode_aliases (barcode, item_id) VALUES (?, ?) ON CONFLICT(barcode) DO UPDATE SET item_id = excluded.item_id',
+      [barcode, itemId],
+    );
+  }
+
   /** Per-item threshold override; local only (not written to Clover). null clears it. */
   static async setThreshold(db: SqlDb, itemId: string, threshold: number | null): Promise<void> {
     if (threshold != null && (!Number.isInteger(threshold) || threshold < 0)) {

@@ -1,4 +1,4 @@
-# Assumptions (Milestones 1–2)
+# Assumptions (Milestones 1–3)
 
 Decisions not dictated by the spec. Each is the safest reasonable option.
 
@@ -59,3 +59,24 @@ Decisions not dictated by the spec. Each is the safest reasonable option.
 - Sync triggers: app launch, foreground, every 10 min while active, pull-to-refresh, Settings buttons. Successful sync bumps a
   `dataVersion` in a zustand store, which is part of every SQLite-backed TanStack Query key.
 - `expo-asset` was added because `expo-sqlite` requires it at runtime.
+
+## Milestone 3 (Scan)
+- `Barcode.normalize` returns all equivalent forms as `candidates` (scanned form, UPC-A, EAN-13 with leading 0; for UPC-E also the expansion),
+  because iOS reports UPC-A as EAN-13 and Clover may store either.
+- Ambiguous 8-digit codes with no scanner type: EAN-8 if it validates as EAN-8; UPC-E if only the UPC-E expansion validates; if both validate,
+  EAN-8 with the UPC-E forms added as extra candidates. 6/7-digit numeric input is treated as UPC-E.
+- Invalid check digits do not block lookup (the code is still tried) but the Not-found sheet warns that the barcode may be misread.
+- Variable-weight rule: UPC-A whose first digit(s) match a configured prefix (default `2`), followed by 5 item digits; the remaining 5 digits
+  are "embedded" price/weight and are **not interpreted** (layouts differ by store/scale). Lookup uses the item portion, trying
+  `201234`, `20123400000C` (zero-filled + valid check), `201234000000` and the EAN-13 form — covering the common ways stores key these into Clover.
+- Prefix rule is read from the local `variable_weight_prefixes` setting (comma/space separated, e.g. `2, 02`); UI to edit it comes with Settings (M6).
+- Lookup chain order is strict: local `code` → local `sku` (case-insensitive) → local `barcode_aliases` → proxy → not found. More than one hit at a stage = "Several items match" picker.
+- Proxy lookup receives the most canonical form (item portion for weighted, else 12-digit UPC-A / GTIN); the server tries the 12↔13-digit variant itself, then SKU.
+  A unique hit is `match`; several hits are `candidates`; deleted items are ignored. Proxy hits are upserted into SQLite so the next scan is local.
+- Proxy failures (offline, auth) during lookup are shown on the Not-found sheet; local actions still work.
+- "Link to existing item" stores the canonical code (`gtin`, else the cleaned code) as a local alias; relinking moves it.
+- "Search manually" opens the Inventory tab pre-filled with the scanned code.
+- Scanning is paused while any sheet is open; identical codes are ignored for 1.2 s (sliding while the code stays in view).
+- Zoom uses −/+ buttons in 10 % steps (0–100 % of device max) instead of pinch. Torch is a toggle.
+- The scanned-item sheet is read-only (cached stock badge, "View details", "Scan next"); stock actions arrive in Milestone 4.
+- Camera permission string set via the `expo-camera` config plugin; microphone permission is not requested.

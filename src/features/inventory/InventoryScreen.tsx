@@ -12,9 +12,9 @@ import { FilterBar } from './FilterBar';
 import { ItemListRow } from './ItemListRow';
 import { useCategories, useItems, type InventoryFilters } from './useItems';
 
-export function InventoryScreen() {
+export function InventoryScreen({ initialSearch }: { initialSearch?: string } = {}) {
   const router = useRouter();
-  const [filters, setFilters] = useState<InventoryFilters>({ sort: 'name', stockStatus: 'all' });
+  const [filters, setFilters] = useState<InventoryFilters>({ sort: 'name', stockStatus: 'all', search: initialSearch });
   const deferred = useDeferredValue(filters);
   const items = useItems(deferred);
   const categories = useCategories();
