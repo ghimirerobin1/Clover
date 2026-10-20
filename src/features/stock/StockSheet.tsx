@@ -8,6 +8,7 @@ import { ProxyClient } from '../../api/proxy';
 import { ADJUST_REASONS, type AdjustReason, type StockAction } from '../../api/schemas';
 import { Badge, Button, Sheet, Skeleton, Stepper, Toast } from '../../components';
 import { AppDatabase } from '../../db/ExpoSqlDb';
+import { IntentQueueRepo } from '../../db/intentQueue';
 import { ItemRepo } from '../../db/items';
 import { SettingsRepo } from '../../db/settings';
 import { ApiError } from '../../lib/errors';
@@ -169,6 +170,24 @@ function StockSheetBody({ req }: { req: StockSheetRequest & { key: number } }) {
     afterWrite(outcome);
   };
 
+  // Offline (spec §4.4): queue the intent as a delta. Nothing is sent; it needs a live confirmation later.
+  const queueable = offline && req.mode === 'edit' && action !== 'count';
+  const queueInvalid = queueable ? IntentQueueRepo.check({ action: action as 'receive' | 'adjust', delta: intent.amount, reason: intent.reason }) : null;
+  const queue = async () => {
+    if (!queueable || queueInvalid) return;
+    await IntentQueueRepo.enqueue(await AppDatabase.get(), {
+      itemId: req.itemId,
+      itemName: name,
+      action: action as 'receive' | 'adjust',
+      delta: intent.amount,
+      ...(intent.reason ? { reason: intent.reason } : {}),
+      ...(intent.note ? { note: intent.note } : {}),
+    });
+    void qc.invalidateQueries({ queryKey: ['local'] });
+    StockSheetController.close();
+    Toast.show({ message: `Queued ${ACTION_LABEL[action]} ${StockMath.signed(intent.amount)} · ${name}. Review it in Activity when online.`, durationMs: 4000 });
+  };
+
   const recheck = async () => {
     setPhase({ kind: 'edit' });
     setLiveBase(null);
@@ -303,6 +322,15 @@ function StockSheetBody({ req }: { req: StockSheetRequest & { key: number } }) {
         onPress={() => void apply()}
         testID="apply"
       />
+      {queueable ? (
+        <>
+          <Button label={`Queue for later (${StockMath.signed(intent.amount)})`} variant="secondary" disabled={queueInvalid != null} onPress={() => void queue()} testID="queue" />
+          <Text className="text-sm text-text-muted">{queueInvalid ?? 'Saved as a change, not a number. You’ll confirm it against live stock when back online.'}</Text>
+        </>
+      ) : null}
+      {offline && req.mode === 'edit' && action === 'count' ? (
+        <Text className="text-sm text-text-muted">Counts can’t be queued offline (they need live stock to be meaningful).</Text>
+      ) : null}
       <Button label="Cancel" variant="ghost" onPress={StockSheetController.close} />
     </ScrollView>
   );

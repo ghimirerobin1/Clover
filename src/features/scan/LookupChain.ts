@@ -62,17 +62,21 @@ export class LookupChain {
   }
 }
 
-/** Ignores repeat reads of the same code within a window (spec: 1.2 s). */
+/**
+ * Ignores repeat reads of the same code within a window (spec: 1.2 s debounce per identical code).
+ * Tracked per code, so two barcodes alternating in the frame can't double-count each other.
+ * The window slides while a code stays in view.
+ */
 export class ScanDebouncer {
   static readonly WINDOW_MS = 1200;
-  private last: { code: string; at: number } | null = null;
+  private readonly seen = new Map<string, number>();
 
   accept(code: string, now = Date.now()): boolean {
-    if (this.last && this.last.code === code && now - this.last.at < ScanDebouncer.WINDOW_MS) {
-      this.last = { code, at: now };
-      return false;
+    const last = this.seen.get(code);
+    this.seen.set(code, now);
+    if (this.seen.size > 64) {
+      for (const [c, at] of this.seen) if (now - at >= ScanDebouncer.WINDOW_MS) this.seen.delete(c);
     }
-    this.last = { code, at: now };
-    return true;
+    return last == null || now - last >= ScanDebouncer.WINDOW_MS;
   }
 }

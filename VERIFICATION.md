@@ -91,6 +91,38 @@ rg -n -i "clover_api_token|merchant_id|CLOVER_MERCHANT" app src
   409 shows live value and needs a second tap; unknown shows Unconfirmed with Apply disabled; ConfirmCard destructive styling;
   a source scan asserting only `StockWriter` calls `writeStock` and only `StockSheet` calls `StockWriter.apply`.
 
+## Milestone 5 (Low Stock, continuous scan, batch, offline queue) coverage
+
+- `src/features/lowstock/__tests__/LowStock.test.ts`: `stock_qty <= threshold` with item → category → global resolution (item override 0 beats
+  global; negative and zero stock included; untracked never low), global-default changes, category grouping (Uncategorized last, lowest first), tab badge.
+- `src/features/batch/__tests__/Tally.test.ts`: increment on repeat, decrement/remove, immutability; debounce + tally (held barcode counts once,
+  re-presented after 1.2 s counts again); synthesized beep WAV header.
+- `src/features/scan/__tests__/LookupChain.test.ts`: debounce is now **per identical code** (two codes alternating in frame can't double-count).
+- `src/features/batch/__tests__/BatchRunner.test.ts`: live reads before writes; **mixed batch** (applied / 409 / 422 / applied) written strictly
+  sequentially (max 1 in flight, no reads or retries in the run); second tap re-sends only conflict+failed rows, Receive recomputes from the new base,
+  Count keeps its absolute number; unknown outcome → Unconfirmed, batch stops, row never re-sent; invalid/offline rows skipped without requests;
+  fresh mutation id per write; queued intents close only when applied/sent, conflicts stay queued and the delta applies to the *live* base.
+- `src/features/batch/__tests__/IntentQueue.test.ts`: the table has **no absolute-quantity column**; Count is refused by the repo and by a SQL CHECK;
+  validation; one-way close; a source scan proving the queue is read only by Activity and the batch screen, `BatchRunner.run` is called only from the
+  batch screen's Apply, and nothing under `src/sync` touches the queue (**never auto-flush**).
+- `src/features/batch/__tests__/BatchScreen.test.tsx`: lists every row live before → after; no write before the Apply tap; per-row ✓/Conflict;
+  applied rows leave the tally; Receive mode; row removal; offline rows can't be applied.
+- `src/features/stock/__tests__/StockSheet.test.tsx`: offline sheet queues Receive as a delta with no write; Count can't be queued; the write-path
+  scan now allows exactly `StockSheet.tsx` and `BatchRunner.ts` to call `StockWriter.apply` (still the only caller of `writeStock`).
+
+### End-to-end (mock mode, real HTTP)
+
+```
+cd server
+CLOVER_MOCK=1 DATABASE_PATH=/tmp/e2e.sqlite3 uv run uvicorn app.main:app --port 8765 &
+CLOVER_MOCK=1 DATABASE_PATH=/tmp/e2e.sqlite3 uv run python scripts/e2e_mock.py --base http://127.0.0.1:8765
+```
+
+`scripts/e2e_mock.py` pairs two devices via the CLI + `/pair`, then drives receive, count, adjust (and adjust without reason → 422),
+a forced 409 (device B changes stock between A's read and write) with re-confirm, an idempotent retry (replayed, same audit id, applied once;
+same id + different body → 409), and a 4-row batch (200 / 200 / 422 untracked / 409 after a sale) with the conflict re-confirmed,
+then checks the audit feed. Last run (Oct 20 2026): **25/25 checks passed**, audit `{applied: 10, conflict: 3}`.
+
 ## Manual test script
 
 Milestone 3 (Scan) — needs a physical device (camera):
@@ -126,12 +158,21 @@ Milestone 4 (mock mode):
 9. Open a sheet, stop the proxy → Apply disabled ("Cached, may be stale"). Kill the proxy *during* Apply → "Unconfirmed"; Activity lists it with Re-check / Dismiss; nothing retries.
 10. Adjust −N below zero → blocked; Adjust without a reason → blocked.
 
-Later milestones: offline intent queue, batch apply, continuous count mode, 15k-item seed performance on device.
+Milestone 5:
+11. Low Stock tab: badge shows the count; set an item threshold on item detail → it moves in/out; tap Receive on a row → stock sheet.
+12. Scan → Counting: scan the same item 3× (lift away between reads) → "Jasmine Rice 20lb ×3" with beep + haptic; holding it in view counts once.
+13. Review & apply → every row shows live before → after; remove a row; Count vs Receive toggle; Apply → per-row ✓ / Conflict / Failed; tap again to retry.
+14. Stop the proxy, open Receive → "Queue for later (+24)"; Activity shows it as Queued. Restart proxy: nothing is sent until "Review & apply queued".
+
+Later milestones: gated create-item, Settings polish, 15k-item seed performance on device.
 
 ## Known gaps / stubs
 
-- Create-item route not yet (Milestone 6). Offline intent queue / batch apply are Milestone 5: offline simply disables Apply. "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
-- Continuous (counting) scan mode is Milestone 5; only single mode exists.
+- Create-item route not yet (Milestone 6). "Create in Clover" button is wired but hidden until the setting exists (Milestone 6).
+- Beep (synthesized WAV via expo-audio + expo-file-system) and continuous-scan ergonomics are not yet verified on a device.
+- Tally is in memory (zustand): it survives navigation but not an app restart.
+- Batch rows whose outcome was unknown are not re-sent; resolve them in Activity (Unconfirmed).
+- Category default thresholds still have no editor UI (Settings, M6); tests set them directly.
 - No settings UI yet for the variable-weight prefix rule (stored setting `variable_weight_prefixes`, default `2`).
 - Beep/haptics preferences are not configurable yet; haptics are always on.
 - Barcode aliases are local only (per spec); they are not synced between devices.

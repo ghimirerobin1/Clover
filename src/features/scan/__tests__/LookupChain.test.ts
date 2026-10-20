@@ -146,6 +146,14 @@ describe('ScanDebouncer', () => {
     expect(d.accept('A', 2100)).toBe(false); // still held in view: window slides
     expect(d.accept('A', 3400)).toBe(true);
     expect(d.accept('B', 3500)).toBe(true);
-    expect(d.accept('A', 3600)).toBe(true);
+    expect(d.accept('A', 3600)).toBe(false); // per identical code: B in between doesn't reset A's window
+    expect(d.accept('A', 4700)).toBe(false); // still sliding (last A read at 3600)
+    expect(d.accept('A', 5900)).toBe(true);
+  });
+
+  it('two codes alternating in the frame are each counted once per window', () => {
+    const d = new ScanDebouncer();
+    const reads = [0, 100, 200, 300, 400, 500].map((t, i) => d.accept(i % 2 ? 'B' : 'A', t));
+    expect(reads).toEqual([true, true, false, false, false, false]);
   });
 });

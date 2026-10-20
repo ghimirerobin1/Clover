@@ -81,6 +81,22 @@ const STEPS: readonly string[] = [
   ALTER TABLE stock_changes ADD COLUMN resolved_at INTEGER;
   CREATE INDEX stock_changes_status ON stock_changes (status, created_at);
   `,
+  // v3 — offline intent queue (spec §4.4). Stores only the intent and its signed delta, never an absolute quantity.
+  `
+  CREATE TABLE queued_intents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    item_name TEXT,
+    action TEXT NOT NULL CHECK (action IN ('receive', 'adjust')),
+    delta INTEGER NOT NULL CHECK (delta <> 0),
+    reason TEXT,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER
+  );
+  CREATE INDEX queued_intents_status ON queued_intents (status, created_at);
+  `,
 ];
 
 export class Migrations {
