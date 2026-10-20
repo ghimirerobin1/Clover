@@ -1,0 +1,9 @@
+{
+  "elements": [
+    { "id": "CAT_RICE", "name": "Rice & Grains", "sortOrder": 1 },
+    { "id": "CAT_NOODLE", "name": "Noodles", "sortOrder": 2 },
+    { "id": "CAT_SAUCE", "name": "Sauces & Condiments", "sortOrder": 3 },
+    { "id": "CAT_SNACK", "name": "Snacks", "sortOrder": 4 },
+    { "id": "CAT_DELI", "name": "Deli & Meat", "sortOrder": 5 }
+  ]
+}

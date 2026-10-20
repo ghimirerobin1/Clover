@@ -1,0 +1,39 @@
+{
+  "elements": [
+    {
+      "id": "ITEM_RICE20", "name": "Jasmine Rice 20lb", "sku": "RICE-JAS-20", "code": "074410000123",
+      "price": 2899, "cost": 2100, "priceType": "FIXED", "modifiedTime": 1760000000000,
+      "itemStock": { "quantity": 14 },
+      "categories": { "elements": [{ "id": "CAT_RICE", "name": "Rice & Grains" }] }
+    },
+    {
+      "id": "ITEM_RAMEN", "name": "Shin Ramyun 4-pack", "sku": "NOOD-SHIN-4", "code": "031146150608",
+      "price": 699, "priceType": "FIXED", "modifiedTime": 1760000100000,
+      "itemStock": { "quantity": 3 },
+      "categories": { "elements": [{ "id": "CAT_NOODLE", "name": "Noodles" }] }
+    },
+    {
+      "id": "ITEM_FISHSAUCE", "name": "Fish Sauce 24oz", "sku": "SAUC-FISH-24", "code": "011152011107",
+      "price": 549, "priceType": "FIXED", "modifiedTime": 1760000200000,
+      "itemStock": { "quantity": 0 },
+      "categories": { "elements": [{ "id": "CAT_SAUCE", "name": "Sauces & Condiments" }] }
+    },
+    {
+      "id": "ITEM_POCKY", "name": "Pocky Chocolate", "sku": "SNCK-POCKY-CH", "code": "073141150019",
+      "price": 249, "priceType": "FIXED", "modifiedTime": 1760000300000,
+      "itemStock": { "quantity": 42 },
+      "categories": { "elements": [{ "id": "CAT_SNACK", "name": "Snacks" }] }
+    },
+    {
+      "id": "ITEM_PORKBELLY", "name": "Pork Belly (per lb)", "sku": "DELI-PORK-BELLY", "code": "201234000000",
+      "price": 699, "priceType": "PER_UNIT", "modifiedTime": 1760000400000,
+      "itemStock": { "quantity": 8 },
+      "categories": { "elements": [{ "id": "CAT_DELI", "name": "Deli & Meat" }] }
+    },
+    {
+      "id": "ITEM_NOSTOCK", "name": "Gift Bag", "sku": "MISC-GIFTBAG", "code": null,
+      "price": 100, "priceType": "FIXED", "modifiedTime": 1760000500000,
+      "categories": { "elements": [] }
+    }
+  ]
+}
