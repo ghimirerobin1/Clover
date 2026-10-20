@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mirrors src/theme/tokens.ts — keep in sync (enforced by tokens.test.ts). */
+:root {
+  --color-bg: 250 250 250;
+  --color-surface: 255 255 255;
+  --color-surface-muted: 241 241 243;
+  --color-border: 228 228 231;
+  --color-text: 24 24 27;
+  --color-text-muted: 113 113 122;
+  --color-accent: 22 128 92;
+  --color-accent-fg: 255 255 255;
+  --color-success: 22 163 74;
+  --color-warning: 217 119 6;
+  --color-danger: 220 38 38;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: 12 12 14;
+    --color-surface: 24 24 27;
+    --color-surface-muted: 39 39 42;
+    --color-border: 52 52 56;
+    --color-text: 244 244 245;
+    --color-text-muted: 161 161 170;
+    --color-accent: 52 199 140;
+    --color-accent-fg: 12 12 14;
+    --color-success: 74 222 128;
+    --color-warning: 251 191 36;
+    --color-danger: 248 113 113;
+  }
+}
